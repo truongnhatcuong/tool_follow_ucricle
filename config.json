@@ -1,0 +1,25 @@
+{
+    "api_key_ai": "sk-Ufa1jT64a20RzFbS31XHOygOMxeGHgJIgYDeQljjWL2MImZs",
+    "ai_base_url": "https://gpt4.shupremium.com/v1",
+    "ai_model": "gpt-4o-mini",
+    "circle_urls": [
+        "https://ucircle.net/app/c/cd8b9cce-da5b-4200-bd00-fc5c793ace8d",
+        "https://ucircle.net/app/c/58830551-136b-4a08-9cc2-540c74645958",
+        "https://ucircle.net/app/c/99dc84b2-f324-4f1c-a73b-d5901fb0e2ec",
+        "https://ucircle.net/app/c/bb16ea11-6f7c-46da-9add-13e4fca94ee2",
+        "https://ucircle.net/app/c/29a99f38-43f5-42c9-accf-f91c1cb85e6a",
+        "https://ucircle.net/app/c/d58c2b39-feb1-4bfc-9d5d-5e9984c86e96",
+        "https://ucircle.net/app/c/7b944633-043c-445b-b516-aeeddb7bb7f9",
+        "https://ucircle.net/app/c/dea448a6-b8e5-40e0-9cd7-68ea12abaac5",
+        "https://ucircle.net/app/c/f798d40c-de5f-4ba7-abfa-870afe234863",
+        "https://ucircle.net/app/c/5b48a3aa-7333-4d6d-9900-057318a89a07",
+        "https://ucircle.net/app/c/1f5d2f8a-3c61-4494-8809-9749b599a86c"
+    ],
+    "delay_between_workflows": 5,
+    "delay_between_circles": 1,
+    "total_workflows": 20,
+    "refresh_interval": 20,
+    "otp_timeout": 120,
+    "headless": false,
+    "target_url": "https://ucircle.net/auth/login"
+}
