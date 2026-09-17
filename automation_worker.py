@@ -359,7 +359,7 @@ class AutomationWorker:
 
                 # Đồng bộ địa chỉ email giữa Tab 1 và Tab 2
                 try:
-                    current_tab1_email = await get_current_email(self.email_page, timeout=2000)
+                    current_tab1_email = await get_current_email(self.email_page, timeout=5000)
                     if current_tab1_email and "@" in current_tab1_email and current_tab1_email.lower() != email.lower():
                         self.log(f"⚠️ Phát hiện Tab 1 đổi sang email mới: {current_tab1_email} (cũ: {email})")
                         email = current_tab1_email

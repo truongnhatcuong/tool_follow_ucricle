@@ -44,6 +44,6 @@
     "total_workflows": 1000,
     "refresh_interval": 30,
     "otp_timeout": 120,
-    "headless": false,
+    "headless": true,
     "target_url": "https://ucircle.net/auth/login"
 }
