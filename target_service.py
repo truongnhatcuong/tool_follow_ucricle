@@ -36,6 +36,7 @@ from selectors import (
     CIRCLE_FOLLOW_BUTTON_SELECTOR,
     CIRCLE_JOIN_BUTTON_SELECTOR,
     TARGET_LOGOUT_BUTTON_SELECTOR,
+    TARGET_CHANGE_EMAIL_BUTTON_SELECTOR,
 )
 
 logger = logging.getLogger("TargetService")
@@ -69,6 +70,116 @@ def generate_profile_data(email: str) -> Tuple[str, str]:
     return display_name, username
 
 
+async def get_displayed_email_on_target(target_page: Page) -> Optional[str]:
+    """
+    Lấy địa chỉ email đang được hiển thị trên màn hình OTP của Target Website (UCircle).
+    """
+    try:
+        # Cách 1: Tìm trong phần tử cha gần nút "Đổi email" nhất
+        change_btn = await target_page.query_selector(TARGET_CHANGE_EMAIL_BUTTON_SELECTOR)
+        if change_btn:
+            parent_text = await change_btn.evaluate(
+                "el => el.closest('div, form, p, section')?.innerText || el.parentElement?.innerText || ''"
+            )
+            matches = re.findall(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', parent_text)
+            if matches:
+                return matches[0].strip().lower()
+
+        # Cách 2: Quét toàn bộ text trong body
+        body_text = await target_page.inner_text("body")
+        matches = re.findall(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', body_text)
+        if matches:
+            return matches[0].strip().lower()
+    except Exception as e:
+        logger.debug(f"Không thể đọc email hiển thị trên target page: {e}")
+    return None
+
+
+async def ensure_matching_email_on_target(
+    target_page: Optional[Page],
+    expected_email: str,
+    log_cb: Optional[Any] = None
+) -> bool:
+    """
+    Kiểm tra xem email trên UCircle có khớp với expected_email (từ 10minutemail) không.
+    Nếu đang ở màn hình OTP mà email hiển thị khác expected_email:
+    - Bấm nút 'Đổi email'
+    - Điền lại chuẩn xác expected_email
+    - Bấm 'Gửi mã đăng nhập'
+    - Chờ quay lại màn hình OTP
+    Trả về True nếu đã đổi email thành công, False nếu email đã trùng khớp hoặc không cần đổi.
+    """
+    if not target_page or target_page.is_closed():
+        return False
+
+    expected_clean = expected_email.strip().lower()
+    if not expected_clean or "@" not in expected_clean:
+        return False
+
+    try:
+        # Kiểm tra sự xuất hiện của nút "Đổi email" trên màn hình OTP
+        change_btn = await target_page.query_selector(TARGET_CHANGE_EMAIL_BUTTON_SELECTOR)
+        if not change_btn or not await change_btn.is_visible():
+            return False
+
+        # Lấy email hiện đang hiển thị trên UCircle
+        displayed_email = await get_displayed_email_on_target(target_page)
+        
+        # Nếu UCircle đã hiển thị đúng email mong đợi -> Khớp 100%, không cần đổi
+        if displayed_email and displayed_email == expected_clean:
+            return False
+
+        # Kiểm tra thêm trong vùng text xung quanh xem có chứa expected_clean không
+        try:
+            surrounding_text = await change_btn.evaluate(
+                "el => el.closest('div, form, p, section')?.innerText || ''"
+            )
+            if expected_clean in surrounding_text.lower():
+                return False
+        except Exception:
+            pass
+
+        # PHÁT HIỆN EMAIL KHÁC NHAU:
+        warn_msg = f"Phát hiện email trên UCircle ({displayed_email or 'không rõ'}) KHÁC email 10p ({expected_clean})!"
+        logger.warning(warn_msg)
+        if log_cb:
+            log_cb(f"⚠️ {warn_msg}")
+            log_cb("Bấm nút 'Đổi email' để nhập lại chuẩn xác email từ 10minutemail...")
+
+        # 1. Bấm nút "Đổi email"
+        await change_btn.click()
+        await asyncio.sleep(0.5)
+
+        # 2. Chờ ô nhập email xuất hiện
+        await target_page.wait_for_selector(TARGET_EMAIL_INPUT_SELECTOR, timeout=8000)
+
+        # 3. Xóa sạch và nhập chuẩn xác expected_email
+        await target_page.click(TARGET_EMAIL_INPUT_SELECTOR)
+        await target_page.fill(TARGET_EMAIL_INPUT_SELECTOR, "")
+        await target_page.fill(TARGET_EMAIL_INPUT_SELECTOR, expected_clean)
+        await asyncio.sleep(0.3)
+
+        # 4. Bấm "Gửi mã đăng nhập"
+        if log_cb:
+            log_cb(f"Bấm 'Gửi mã đăng nhập' cho email đúng: {expected_clean}...")
+        await target_page.wait_for_selector(TARGET_SEND_CODE_BUTTON_SELECTOR, timeout=8000)
+        await target_page.click(TARGET_SEND_CODE_BUTTON_SELECTOR)
+
+        # 5. Chờ giao diện OTP xuất hiện lại
+        await target_page.wait_for_selector(TARGET_OTP_INPUT_SELECTOR, timeout=15000)
+        if log_cb:
+            log_cb("✓ Đã đổi email và gửi mã OTP thành công tới đúng email 10p!")
+
+        return True
+
+    except Exception as e:
+        err_msg = f"Lỗi khi thực hiện Đổi email trên UCircle: {e}"
+        logger.error(err_msg)
+        if log_cb:
+            log_cb(err_msg)
+        return False
+
+
 async def fill_email_and_request_code(
     target_page: Page,
     email: str,
@@ -79,23 +190,66 @@ async def fill_email_and_request_code(
     """
     email_selector = (custom_selectors or {}).get("email_input") or TARGET_EMAIL_INPUT_SELECTOR
     send_btn_selector = (custom_selectors or {}).get("send_btn") or TARGET_SEND_CODE_BUTTON_SELECTOR
+    otp_selector = (custom_selectors or {}).get("otp_input") or TARGET_OTP_INPUT_SELECTOR
 
     try:
-        # KIỂM TRA PHÒNG THỦ: Nếu đang ở màn hình "Bạn đã đăng nhập" -> Bấm "Đăng xuất" trước
-        try:
-            logout_btn = await target_page.query_selector(TARGET_LOGOUT_BUTTON_SELECTOR)
+        # Luôn đảm bảo đang ở đúng trang /auth/login
+        if "/auth/login" not in target_page.url:
+            await target_page.goto(DEFAULT_TARGET_URL, wait_until="domcontentloaded", timeout=25000)
+            await asyncio.sleep(0.5)
+
+        # Chờ bất kỳ trạng thái nào xuất hiện (Form email, Đăng xuất, Đổi email, hoặc Vào UCircle)
+        for attempt in range(3):
+            try:
+                await target_page.wait_for_selector(
+                    f"{email_selector}, button:has-text('Đăng xuất'), button:has-text('Đổi email'), button:has-text('Vào UCircle')",
+                    timeout=5000
+                )
+            except Exception:
+                pass
+
+            # 1. Nếu có nút "Đăng xuất" hoặc màn hình "Bạn đã đăng nhập"
+            logout_btn = await target_page.query_selector("button:has-text('Đăng xuất'), button._link_1yt08_137:has-text('Đăng xuất')")
             if logout_btn and await logout_btn.is_visible():
-                logger.info("Phát hiện tài khoản cũ còn lưu session ('Bạn đã đăng nhập') -> Bấm 'Đăng xuất'...")
+                logger.info("Phát hiện tài khoản cũ còn lưu session ('Đăng xuất') -> Bấm 'Đăng xuất'...")
                 await logout_btn.click()
-                await asyncio.sleep(1.5)
-        except Exception:
-            pass
+                await asyncio.sleep(1)
+                continue
+
+            # 2. Nếu đang ở màn hình OTP
+            change_btn = await target_page.query_selector(TARGET_CHANGE_EMAIL_BUTTON_SELECTOR)
+            if change_btn and await change_btn.is_visible():
+                displayed_email = await get_displayed_email_on_target(target_page)
+                if displayed_email and displayed_email == email.strip().lower():
+                    logger.info(f"Target page đã ở sẵn màn hình OTP với đúng email: {email}")
+                    return True
+                logger.info(f"Target page đang kẹt ở màn hình OTP email ({displayed_email}) -> Bấm 'Đổi email'...")
+                await change_btn.click()
+                await asyncio.sleep(0.6)
+                continue
+
+            # 3. Kiểm tra ô nhập email đã sẵn sàng chưa
+            email_el = await target_page.query_selector(email_selector)
+            if email_el and await email_el.is_visible():
+                break
+
+            # Nếu chưa thấy ô nhập email (bị kẹt phiên cũ), xóa sạch storage và tải lại trang
+            logger.info("Chưa thấy ô nhập email, làm sạch storage và tải lại /auth/login...")
+            try:
+                await target_page.evaluate("() => { try { localStorage.clear(); sessionStorage.clear(); } catch(e){} }")
+            except Exception:
+                pass
+            await target_page.goto(DEFAULT_TARGET_URL, wait_until="domcontentloaded", timeout=15000)
+            await asyncio.sleep(1)
 
         logger.info(f"Điền email: {email} vào target page...")
-        await target_page.wait_for_selector(email_selector, timeout=12000)
-        await target_page.fill(email_selector, email)
+        await target_page.wait_for_selector(email_selector, timeout=10000)
+        # Xóa sạch ô nhập email trước khi điền
+        await target_page.click(email_selector)
+        await target_page.fill(email_selector, "")
+        await target_page.fill(email_selector, email.strip())
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
 
         logger.info("Bấm nút 'Gửi mã đăng nhập' trên target page...")
         await target_page.wait_for_selector(send_btn_selector, timeout=10000)
@@ -103,7 +257,6 @@ async def fill_email_and_request_code(
 
         # Chờ giao diện chuyển sang màn hình nhập mã OTP
         logger.info("Chờ màn hình nhập mã OTP xuất hiện...")
-        otp_selector = (custom_selectors or {}).get("otp_input") or TARGET_OTP_INPUT_SELECTOR
         await target_page.wait_for_selector(otp_selector, timeout=15000)
         logger.info("Màn hình nhập mã OTP đã hiển thị thành công.")
 
@@ -111,6 +264,7 @@ async def fill_email_and_request_code(
     except Exception as e:
         logger.error(f"Lỗi khi gửi mã trên target page: {e}")
         return False
+
 
 
 async def resend_code_if_available(target_page: Page) -> bool:
@@ -344,7 +498,7 @@ async def enter_app_and_complete_profile(
 async def process_circles(
     target_page: Page,
     circle_urls: list,
-    delay_between_circles: int = 2,
+    delay_between_circles: float = 1,
     log_cb: Optional[Any] = None
 ) -> int:
     """
@@ -352,7 +506,7 @@ async def process_circles(
     - Mở từng Circle
     - Bấm 'Theo dõi' trước
     - Bấm '＋ Tham gia' sau
-    - Nghỉ ngơi giữa các Circle
+    - Nghỉ ngơi giữa các Circle (tối ưu hóa tốc độ cao)
     """
     if not circle_urls:
         return 0
@@ -370,17 +524,20 @@ async def process_circles(
             if log_cb:
                 log_cb(f"{prefix_log}: Điều hướng tới {url}...")
 
-            await target_page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            await asyncio.sleep(2)
+            await target_page.goto(url, wait_until="domcontentloaded", timeout=25000)
 
-            # Chờ vùng nút Theo dõi hoặc Tham gia xuất hiện
+            # Chờ nhanh nút Theo dõi hoặc Tham gia hiển thị (không sleep tĩnh lâu)
             try:
                 await target_page.wait_for_selector(
                     f"{CIRCLE_FOLLOW_BUTTON_SELECTOR}, {CIRCLE_JOIN_BUTTON_SELECTOR}, {CIRCLE_CTA_CONTAINER_SELECTOR}",
-                    timeout=10000
+                    state="visible",
+                    timeout=3500
                 )
             except Exception:
                 pass
+
+            # Đệm ngắn đảm bảo DOM đã gắn event handler
+            await asyncio.sleep(0.3)
 
             # BƯỚC A: Bấm "Theo dõi" trước
             follow_btn = await target_page.query_selector(CIRCLE_FOLLOW_BUTTON_SELECTOR)
@@ -393,7 +550,7 @@ async def process_circles(
                     if log_cb:
                         log_cb(f"{prefix_log}: Bấm 'Theo dõi'...")
                     await follow_btn.click()
-                    await asyncio.sleep(1.2)
+                    await asyncio.sleep(0.35)
                     if log_cb:
                         log_cb(f"{prefix_log}: ✓ Đã theo dõi thành công")
                 else:
@@ -409,16 +566,16 @@ async def process_circles(
                 if log_cb:
                     log_cb(f"{prefix_log}: Bấm '＋ Tham gia'...")
                 await join_btn.click()
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(0.4)
 
-                # Kiểm tra xem có popup/dialog xác nhận tham gia hay không
+                # Kiểm tra nhanh xem có popup/dialog xác nhận tham gia hay không
                 try:
                     confirm_btn = await target_page.query_selector(
                         "button[data-join-confirm='true'], div[role='dialog'] button:has-text('Tham gia'), div[role='dialog'] button:has-text('Xác nhận')"
                     )
                     if confirm_btn and await confirm_btn.is_visible():
                         await confirm_btn.click()
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(0.3)
                 except Exception:
                     pass
 
@@ -440,6 +597,7 @@ async def process_circles(
                 log_cb(err_msg)
 
     return success_count
+
 
 
 async def logout_and_prepare_next_target_session(

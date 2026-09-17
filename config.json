@@ -13,12 +13,18 @@
         "https://ucircle.net/app/c/dea448a6-b8e5-40e0-9cd7-68ea12abaac5",
         "https://ucircle.net/app/c/f798d40c-de5f-4ba7-abfa-870afe234863",
         "https://ucircle.net/app/c/5b48a3aa-7333-4d6d-9900-057318a89a07",
-        "https://ucircle.net/app/c/1f5d2f8a-3c61-4494-8809-9749b599a86c"
+        "https://ucircle.net/app/c/1f5d2f8a-3c61-4494-8809-9749b599a86c",
+        "https://ucircle.net/app/c/e19c1e0a-69c0-4657-83c6-187df3b3565f",
+        "https://ucircle.net/app/c/b5c66623-ba26-4e5e-92b6-7aa1442b2caf",
+        "https://ucircle.net/app/c/6410c9cd-71d6-4b80-9e76-ef0060da10c0",
+        "https://ucircle.net/app/c/9e158d37-a7f9-4669-8520-07f4d9bbd33f",
+        "https://ucircle.net/app/c/e3500793-72a2-4c0e-b7b0-4d865eddcbe3",
+        "https://ucircle.net/app/c/aababdcc-7e2d-44b0-b56c-b1636d774032"
     ],
-    "delay_between_workflows": 5,
-    "delay_between_circles": 1,
-    "total_workflows": 20,
-    "refresh_interval": 20,
+    "delay_between_workflows": 5.0,
+    "delay_between_circles": 1.0,
+    "total_workflows": 1000,
+    "refresh_interval": 25,
     "otp_timeout": 120,
     "headless": false,
     "target_url": "https://ucircle.net/auth/login"

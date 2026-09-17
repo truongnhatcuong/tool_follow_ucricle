@@ -27,6 +27,7 @@ class TestSelectors(unittest.TestCase):
         self.assertTrue(selectors.CIRCLE_JOIN_BUTTON_SELECTOR is not None)
         self.assertTrue(selectors.CIRCLE_CTA_CONTAINER_SELECTOR is not None)
         self.assertTrue(selectors.TARGET_LOGOUT_BUTTON_SELECTOR is not None)
+        self.assertTrue(selectors.TARGET_CHANGE_EMAIL_BUTTON_SELECTOR is not None)
 
 
 class TestEmailFiltering(unittest.TestCase):

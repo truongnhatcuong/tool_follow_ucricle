@@ -18,16 +18,16 @@ logger = logging.getLogger("Config")
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
 DEFAULT_CONFIG: Dict[str, Any] = {
-    "api_key_ai": "sk-UOHJMiR785639A6Qz5QzR7otUSpVNYpHl8SAcMDIXh20hZ0l",
-    "ai_base_url": "https://gpt2.shupremium.com/v1",
+    "api_key_ai": "sk-e2wq2BTpuFpT9tqKeiwvSYwMVKxwvwSLd6cZ9Tcrh9Ql5yx8",
+    "ai_base_url": "https://api1.shupremium.com/v1",
     "ai_model": "gpt-4o-mini",
     "circle_urls": [
         "https://ucircle.net/app/c/7b944633-043c-445b-b516-aeeddb7bb7f9"
     ],
     "delay_between_workflows": 5,
-    "delay_between_circles": 2,
-    "total_workflows": 20,
-    "refresh_interval": 15,
+    "delay_between_circles": 1,
+    "total_workflows": 1000,
+    "refresh_interval": 20,
     "otp_timeout": 120,
     "headless": False,
     "target_url": "https://ucircle.net/auth/login"

@@ -94,11 +94,14 @@ TARGET_SEND_CODE_BUTTON_SELECTOR = (
     "#send-otp-btn, button:has-text('Send Code')"
 )
 
-# Nút "Gửi lại mã" (Resend OTP)
-# LƯU Ý: KHÔNG dùng selector class chung chung (vd: button[class*='_link_'])
-# vì nút "Đổi email" cạnh bên dùng chung class CSS module (_link_xxxx),
-# khiến query_selector có thể bấm nhầm nút.
 TARGET_RESEND_BUTTON_SELECTOR = "button:has-text('Gửi lại mã'), button:has-text('Gửi lại')"
+
+# Nút "Đổi email" trên màn hình OTP của UCircle
+TARGET_CHANGE_EMAIL_BUTTON_SELECTOR = (
+    "button:has-text('Đổi email'), button._link_1yt08_137:has-text('Đổi email'), "
+    "button[class*='_link_']:has-text('Đổi email')"
+)
+
 
 # Ô nhập mã OTP (UCircle dùng #uc-code hoặc placeholder 6 dấu chấm)
 TARGET_OTP_INPUT_SELECTOR = (

@@ -37,6 +37,7 @@ from target_service import (
     process_circles,
     logout_and_prepare_next_target_session,
     reset_target_session,
+    ensure_matching_email_on_target,
 )
 from ai_service import ModelAi
 
@@ -52,22 +53,22 @@ class AutomationWorker:
         headless: bool = False,
         target_url: str = DEFAULT_TARGET_URL,
         circle_urls: Optional[list] = None,
-        delay_between_workflows: int = 5,
-        delay_between_circles: int = 2,
+        delay_between_workflows: float = 5,
+        delay_between_circles: float = 1,
         api_key_ai: str = "",
-        ai_base_url: str = "https://gpt2.shupremium.com/v1",
+        ai_base_url: str = "https://api1.shupremium.com/v1",
         ai_model: str = "gpt-4o-mini",
         custom_selectors: Optional[Dict[str, str]] = None,
         ui_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None
     ):
-        self.total_workflows = total_workflows
-        self.refresh_interval = refresh_interval
-        self.otp_timeout = otp_timeout
+        self.total_workflows = int(total_workflows)
+        self.refresh_interval = int(refresh_interval)
+        self.otp_timeout = int(otp_timeout)
         self.headless = headless
         self.target_url = target_url or DEFAULT_TARGET_URL
         self.circle_urls = circle_urls or []
-        self.delay_between_workflows = delay_between_workflows
-        self.delay_between_circles = delay_between_circles
+        self.delay_between_workflows = float(delay_between_workflows)
+        self.delay_between_circles = float(delay_between_circles)
         self.api_key_ai = api_key_ai
         self.ai_base_url = ai_base_url
         self.ai_model = ai_model
@@ -256,10 +257,15 @@ class AutomationWorker:
                 if wf_idx < self.total_workflows and not self._stop_requested:
                     if self.delay_between_workflows > 0:
                         self.log(f"Đã hoàn thành các Circle. Bắt đầu nghỉ ngơi {self.delay_between_workflows}s theo quy định...")
-                        for rem in range(self.delay_between_workflows, 0, -1):
-                            await self._check_pause_or_stop()
-                            self.update_ui_checklist(tasks=f"Nghỉ ({rem}s)")
-                            await asyncio.sleep(1)
+                        total_secs = int(self.delay_between_workflows)
+                        if total_secs >= 1:
+                            for rem in range(total_secs, 0, -1):
+                                await self._check_pause_or_stop()
+                                self.update_ui_checklist(tasks=f"Nghỉ ({rem}s)")
+                                await asyncio.sleep(1)
+                        rem_fraction = self.delay_between_workflows - total_secs
+                        if rem_fraction > 0:
+                            await asyncio.sleep(rem_fraction)
 
                     self.log("Hết thời gian nghỉ ngơi -> Chuẩn bị cho workflow tiếp theo: Yêu cầu tạo email mới...")
                     await self._check_pause_or_stop()
@@ -289,7 +295,6 @@ class AutomationWorker:
                 await self.target_page.goto(self.target_url, wait_until="domcontentloaded", timeout=30000)
             else:
                 self.log(f"Chuyển sang Tab 2 Target Website: {self.target_url}")
-                await self.target_page.bring_to_front()
                 if "/auth/login" not in self.target_page.url:
                     await self.target_page.goto(self.target_url, wait_until="domcontentloaded", timeout=30000)
 
@@ -314,7 +319,10 @@ class AutomationWorker:
             # BƯỚC 6: Quay lại tab temporary email
             # ----------------------------------------------------
             self.log("Chuyển quyền điều khiển về Tab Email tạm thời...")
-            await self.email_page.bring_to_front()
+
+            # Kiểm tra đảm bảo email trên Tab 2 UCircle trùng khớp 100% với email Tab 1
+            if self.target_page and not self.target_page.is_closed():
+                await ensure_matching_email_on_target(self.target_page, email, log_cb=self.log)
 
             # ----------------------------------------------------
             # BƯỚC 7: Vòng lặp chờ OTP
@@ -329,6 +337,24 @@ class AutomationWorker:
 
             while time.time() - start_wait_time < self.otp_timeout:
                 await self._check_pause_or_stop()
+
+                # Đồng bộ địa chỉ email giữa Tab 1 và Tab 2
+                try:
+                    current_tab1_email = await get_current_email(self.email_page, timeout=2000)
+                    if current_tab1_email and "@" in current_tab1_email and current_tab1_email.lower() != email.lower():
+                        self.log(f"⚠️ Phát hiện Tab 1 đổi sang email mới: {current_tab1_email} (cũ: {email})")
+                        email = current_tab1_email
+                        self.update_ui_progress(email=email)
+                except Exception:
+                    pass
+
+                # Nếu UCircle khác email -> Tự động bấm 'Đổi email', nhập lại chuẩn và gửi lại mã
+                if self.target_page and not self.target_page.is_closed():
+                    fixed = await ensure_matching_email_on_target(self.target_page, email, log_cb=self.log)
+                    if fixed:
+                        start_wait_time = time.time()
+                        refresh_count = 0
+                        has_resent = False
 
                 await asyncio.sleep(self.refresh_interval)
 
@@ -388,8 +414,6 @@ class AutomationWorker:
                         if resent:
                             has_resent = True
                             self.log("✓ Đã bấm 'Gửi lại mã' thành công trên UCircle!")
-                            # Chuyển quyền điều khiển lại về email_page
-                            await self.email_page.bring_to_front()
                         else:
                             self.log("Nút 'Gửi lại mã' đang trong thời gian chờ (cooldown), sẽ kiểm tra lại ở lượt refresh sau...")
 
@@ -402,8 +426,7 @@ class AutomationWorker:
             # ----------------------------------------------------
             # BƯỚC 8: Chuyển về target_page để điền OTP & xác minh
             # ----------------------------------------------------
-            self.log("Chuyển về Tab Target Website để điền OTP...")
-            await self.target_page.bring_to_front()
+            self.log("Điền mã OTP và xác minh trên Target Website...")
 
             verify_ok = await fill_otp_and_verify(self.target_page, otp_found, self.custom_selectors)
             if not verify_ok:
@@ -429,7 +452,7 @@ class AutomationWorker:
             else:
                 self.log("Cảnh báo: Không thể hoàn tất hộp thoại hồ sơ (có thể tài khoản đã có hồ sơ trước đó)")
 
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(0.5)
 
             # ----------------------------------------------------
             # BƯỚC 10: Theo dõi và Tham gia danh sách Circle
@@ -455,13 +478,7 @@ class AutomationWorker:
                 self.context,
                 self.target_url
             )
-            self.log("Chuyển quyền điều khiển qua Tab Email để chuẩn bị cho luồng tiếp theo...")
-            try:
-                if self.email_page and not self.email_page.is_closed():
-                    await self.email_page.bring_to_front()
-            except Exception:
-                pass
-
+            self.log("Đã chuẩn bị tab Target sẵn sàng cho luồng tiếp theo...")
             await asyncio.sleep(1)
             return True
 
@@ -474,11 +491,6 @@ class AutomationWorker:
             # Đảm bảo phiên UCircle luôn được đăng xuất và dọn dẹp sạch sẽ
             if self.target_page and not self.target_page.is_closed():
                 await logout_and_prepare_next_target_session(self.target_page, self.context, self.target_url)
-            try:
-                if self.email_page and not self.email_page.is_closed():
-                    await self.email_page.bring_to_front()
-            except Exception:
-                pass
 
     async def _cleanup(self):
         self.is_running = False

@@ -280,7 +280,7 @@ class AutomationApp(ctk.CTk):
         # 5. Delay between circles
         ctk.CTkLabel(config_card, text="Nghỉ giữa mỗi Circle:").grid(row=5, column=0, padx=12, pady=2, sticky="w")
         self.ent_delay_circles = ctk.CTkEntry(config_card, width=70)
-        self.ent_delay_circles.insert(0, str(self.app_config.get("delay_between_circles", 2)))
+        self.ent_delay_circles.insert(0, str(self.app_config.get("delay_between_circles", 1)))
         self.ent_delay_circles.grid(row=5, column=1, padx=6, pady=2, sticky="w")
         ctk.CTkLabel(config_card, text="giây", text_color="#94a3b8").grid(row=5, column=2, padx=4, pady=2, sticky="w")
 
@@ -449,8 +449,8 @@ class AutomationApp(ctk.CTk):
         self.app_config["api_key_ai"] = self.ent_api_key.get().strip()
         self.app_config["target_url"] = self.ent_target_url.get().strip() or DEFAULT_TARGET_URL
         try:
-            self.app_config["delay_between_workflows"] = int(self.ent_delay_workflows.get().strip() or "5")
-            self.app_config["delay_between_circles"] = int(self.ent_delay_circles.get().strip() or "2")
+            self.app_config["delay_between_workflows"] = float(self.ent_delay_workflows.get().strip() or "5")
+            self.app_config["delay_between_circles"] = float(self.ent_delay_circles.get().strip() or "1")
             self.app_config["total_workflows"] = int(self.ent_workflows.get().strip() or "20")
             self.app_config["refresh_interval"] = int(self.ent_refresh_interval.get().strip() or "15")
             self.app_config["otp_timeout"] = int(self.ent_otp_timeout.get().strip() or "120")
@@ -539,10 +539,10 @@ class AutomationApp(ctk.CTk):
             workflows = int(self.ent_workflows.get().strip() or "20")
             refresh_interval = int(self.ent_refresh_interval.get().strip() or "15")
             otp_timeout = int(self.ent_otp_timeout.get().strip() or "120")
-            delay_workflows = int(self.ent_delay_workflows.get().strip() or "5")
-            delay_circles = int(self.ent_delay_circles.get().strip() or "2")
+            delay_workflows = float(self.ent_delay_workflows.get().strip() or "5")
+            delay_circles = float(self.ent_delay_circles.get().strip() or "1")
         except ValueError:
-            self.append_log("Lỗi: Vui lòng nhập số nguyên hợp lệ cho các trường cấu hình!")
+            self.append_log("Lỗi: Vui lòng nhập số hợp lệ cho các trường cấu hình!")
             return
 
         headless = (self.sw_headless.get() == 1)
@@ -553,7 +553,7 @@ class AutomationApp(ctk.CTk):
         # Lưu cấu hình mới ra config.json
         new_cfg = {
             "api_key_ai": api_key_ai,
-            "ai_base_url": self.app_config.get("ai_base_url", "https://gpt2.shupremium.com/v1"),
+            "ai_base_url": self.app_config.get("ai_base_url", "https://api1.shupremium.com/v1"),
             "ai_model": self.app_config.get("ai_model", "gpt-4o-mini"),
             "circle_urls": circle_urls,
             "delay_between_workflows": delay_workflows,
@@ -581,7 +581,7 @@ class AutomationApp(ctk.CTk):
             delay_between_workflows=delay_workflows,
             delay_between_circles=delay_circles,
             api_key_ai=api_key_ai,
-            ai_base_url=new_cfg.get("ai_base_url", "https://gpt2.shupremium.com/v1"),
+            ai_base_url=new_cfg.get("ai_base_url", "https://api1.shupremium.com/v1"),
             ai_model=new_cfg.get("ai_model", "gpt-4o-mini"),
             ui_callback=self.ui_callback
         )
