@@ -19,6 +19,7 @@ from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 
 from selectors import (
     TEMP_MAIL_URL,
+    TEMP_MAIL_NEW_URL,
     INBOX_TABLE_SELECTOR,
     DEFAULT_TARGET_URL,
 )
@@ -40,6 +41,7 @@ from target_service import (
     ensure_matching_email_on_target,
 )
 from ai_service import ModelAi
+from sleep_preventer import sleep_preventer
 
 logger = logging.getLogger("AutomationWorker")
 
@@ -170,8 +172,9 @@ class AutomationWorker:
         self._pause_event.set()
         self.update_ui_status("RUNNING")
         self.log("Khởi động trình duyệt Playwright Chromium...")
-
         try:
+            sleep_preventer.prevent_sleep("UCircle Automation Running")
+            self.log("✓ Đã bật chế độ chống Sleep: Giữ máy tính luôn hoạt động (Stay Awake)!")
             self.playwright = await async_playwright().start()
 
             args = [
@@ -222,6 +225,9 @@ class AutomationWorker:
             await self.email_page.goto(TEMP_MAIL_URL, wait_until="domcontentloaded", timeout=45000)
 
             current_email = await get_current_email(self.email_page)
+            if not current_email or "@" not in current_email:
+                self.log("Email ban đầu chưa sẵn sàng, đang yêu cầu cấp email mới...")
+                current_email = await create_next_email(self.email_page)
             self.log(f"Created email: {current_email}")
 
             # ----------------------------------------------------
@@ -269,7 +275,45 @@ class AutomationWorker:
 
                     self.log("Hết thời gian nghỉ ngơi -> Chuẩn bị cho workflow tiếp theo: Yêu cầu tạo email mới...")
                     await self._check_pause_or_stop()
-                    current_email = await create_next_email(self.email_page)
+
+                    new_email_addr = ""
+                    for email_retry in range(1, 5):
+                        try:
+                            new_email_addr = await create_next_email(self.email_page)
+                            if new_email_addr and "@" in new_email_addr:
+                                break
+                        except Exception as em_err:
+                            self.log(f"Cảnh báo: Lỗi khi tạo email mới (lần {email_retry}/4): {em_err}")
+
+                        self.log(f"Chưa lấy được email mới hoặc quá thời gian. Đang thử tải lại trang email (lần {email_retry}/4)...")
+                        try:
+                            if self.email_page.is_closed():
+                                self.email_page = await self.context.new_page()
+                            await self.email_page.goto(TEMP_MAIL_NEW_URL, wait_until="domcontentloaded", timeout=15000)
+                            await asyncio.sleep(1)
+                            new_email_addr = await get_current_email(self.email_page, timeout=8000)
+                            if new_email_addr and "@" in new_email_addr:
+                                break
+                        except Exception:
+                            try:
+                                await self.email_page.goto(TEMP_MAIL_URL, wait_until="domcontentloaded", timeout=15000)
+                            except Exception:
+                                pass
+                        await asyncio.sleep(2)
+
+                    # Phương án dự phòng cao nhất: nếu tab email bị nghẽn, mở lại tab mới
+                    if not new_email_addr or "@" not in new_email_addr:
+                        self.log("Cảnh báo: Tab email cũ không phản hồi, đang mở lại Tab Email mới...")
+                        try:
+                            if not self.email_page.is_closed():
+                                await self.email_page.close()
+                        except Exception:
+                            pass
+                        self.email_page = await self.context.new_page()
+                        await self.email_page.goto(TEMP_MAIL_URL, wait_until="domcontentloaded", timeout=30000)
+                        new_email_addr = await get_current_email(self.email_page, timeout=15000)
+
+                    current_email = new_email_addr
                     self.log(f"Created email: {current_email}")
                     await asyncio.sleep(1)
 
@@ -282,6 +326,7 @@ class AutomationWorker:
             self.log(f"Lỗi hệ thống: {e}")
             self.update_ui_status("ERROR")
         finally:
+            sleep_preventer.allow_sleep()
             await self._cleanup()
 
     async def _run_single_workflow(self, wf_idx: int, email: str) -> bool:

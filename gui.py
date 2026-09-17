@@ -22,6 +22,7 @@ from selectors import DEFAULT_TARGET_URL
 from automation_worker import AutomationWorker
 from mock_server import get_mock_server
 from config import load_config, save_config
+from sleep_preventer import sleep_preventer
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -47,6 +48,7 @@ class AutomationApp(ctk.CTk):
 
         # Xử lý message queue an toàn trên UI thread
         self.after(100, self._process_queue)
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def _create_ui(self):
         self.grid_columnconfigure(0, weight=1)
@@ -603,6 +605,17 @@ class AutomationApp(ctk.CTk):
     def on_stop_clicked(self):
         if self.worker:
             self.worker.stop()
+        sleep_preventer.allow_sleep()
+
+    def on_closing(self):
+        """Dọn dẹp tài nguyên và khôi phục chế độ sleep khi đóng cửa sổ ứng dụng"""
+        try:
+            if self.worker:
+                self.worker.stop()
+            sleep_preventer.allow_sleep()
+        except Exception:
+            pass
+        self.destroy()
 
 
 def run_gui():
