@@ -35,56 +35,113 @@ logger = logging.getLogger("EmailService")
 
 async def get_current_email(email_page: Page, timeout: int = 15000) -> str:
     """
-    Lấy địa chỉ email hiện tại từ ô input giao diện.
+    Lấy địa chỉ email hiện tại từ ô input giao diện (#fe_text).
+    Tự động bắt lỗi timeout và reload nếu mạng chậm hoặc Cloudflare.
     """
     if "error-due" in email_page.url:
         logger.warning("Email tạm đã hết hạn (error-due) -> Đang yêu cầu cấp email mới...")
-        await email_page.goto(TEMP_MAIL_NEW_URL, wait_until="domcontentloaded")
+        try:
+            await email_page.goto(TEMP_MAIL_NEW_URL, wait_until="domcontentloaded", timeout=15000)
+        except Exception:
+            pass
 
-    await email_page.wait_for_selector(EMAIL_INPUT_SELECTOR, timeout=timeout)
-    for _ in range(25):
-        email_val = await email_page.input_value(EMAIL_INPUT_SELECTOR)
-        if email_val and "@" in email_val:
-            return email_val.strip()
-        await asyncio.sleep(0.3)
-    return ""
+    for attempt in range(1, 3):
+        try:
+            await email_page.wait_for_selector(EMAIL_INPUT_SELECTOR, timeout=timeout // 2)
+            for _ in range(25):
+                email_val = await email_page.input_value(EMAIL_INPUT_SELECTOR)
+                if email_val and "@" in email_val:
+                    return email_val.strip()
+                await asyncio.sleep(0.3)
+        except Exception as e:
+            logger.warning(f"Lấy email hiện tại chưa thành công (lần {attempt}/2): {e}")
+            try:
+                await email_page.reload(wait_until="domcontentloaded", timeout=12000)
+            except Exception:
+                pass
+            await asyncio.sleep(1)
+
+    try:
+        val = await email_page.input_value(EMAIL_INPUT_SELECTOR)
+        return val.strip() if val and "@" in val else ""
+    except Exception:
+        return ""
 
 
-async def create_next_email(email_page: Page, timeout: int = 25000) -> str:
+async def create_next_email(email_page: Page, timeout: int = 30000, max_retries: int = 4) -> str:
     """
     Yêu cầu tạo email tạm tiếp theo cho workflow mới.
-    Bấm vào nút New Email, đợi trang tải lại và địa chỉ email thay đổi.
+    Bấm vào nút New Email hoặc chuyển tới new.html.
+    Tự động retry nhiều lần nếu quá giờ chờ (#fe_text timeout do Cloudflare/mạng chậm),
+    đảm bảo không bao giờ để crash cả phiên làm việc.
     """
     old_email = ""
     try:
-        old_email = await email_page.input_value(EMAIL_INPUT_SELECTOR)
+        val = await email_page.input_value(EMAIL_INPUT_SELECTOR)
+        if val and "@" in val:
+            old_email = val.strip()
     except Exception:
         pass
 
-    logger.info(f"Yêu cầu tạo email mới (email cũ: {old_email})")
+    logger.info(f"Bắt đầu quy trình tạo email mới (email hiện tại: {old_email or 'None'})")
 
-    # Bấm nút New Email hoặc điều hướng trực tiếp đến new.html
-    new_btn = await email_page.query_selector(NEW_EMAIL_BUTTON_SELECTOR)
-    if new_btn:
+    per_attempt_timeout = max(7000, timeout // max_retries)
+
+    for attempt in range(1, max_retries + 1):
+        logger.info(f"Tạo email mới - Lần thử {attempt}/{max_retries}...")
         try:
-            await new_btn.click()
-        except Exception:
-            await email_page.goto(TEMP_MAIL_NEW_URL, wait_until="domcontentloaded")
-    else:
-        await email_page.goto(TEMP_MAIL_NEW_URL, wait_until="domcontentloaded")
+            # Ở lần thử đầu tiên, ưu tiên click nút nếu có
+            navigated = False
+            if attempt == 1:
+                new_btn = await email_page.query_selector(NEW_EMAIL_BUTTON_SELECTOR)
+                if new_btn:
+                    try:
+                        await new_btn.click(timeout=4000)
+                        navigated = True
+                    except Exception:
+                        pass
 
-    await email_page.wait_for_selector(EMAIL_INPUT_SELECTOR, timeout=timeout)
+            if not navigated:
+                # Điều hướng thẳng tới new.html để hệ thống tự cấp email mới
+                try:
+                    await email_page.goto(TEMP_MAIL_NEW_URL, wait_until="domcontentloaded", timeout=12000)
+                except Exception:
+                    await email_page.goto(TEMP_MAIL_URL, wait_until="domcontentloaded", timeout=12000)
 
-    # Vòng lặp chờ email mới khác với email cũ
-    start_time = asyncio.get_event_loop().time()
-    while asyncio.get_event_loop().time() - start_time < (timeout / 1000.0):
-        new_email = await email_page.input_value(EMAIL_INPUT_SELECTOR)
-        if new_email and "@" in new_email and new_email != old_email:
-            logger.info(f"Đã tạo email mới thành công: {new_email}")
-            return new_email.strip()
-        await asyncio.sleep(0.5)
+            # Chờ phần tử #fe_text xuất hiện
+            await email_page.wait_for_selector(EMAIL_INPUT_SELECTOR, timeout=per_attempt_timeout)
 
-    return await email_page.input_value(EMAIL_INPUT_SELECTOR)
+            # Chờ giá trị email hợp lệ và khác email cũ (nếu có)
+            poll_start = asyncio.get_event_loop().time()
+            while asyncio.get_event_loop().time() - poll_start < (per_attempt_timeout / 1000.0):
+                new_email = (await email_page.input_value(EMAIL_INPUT_SELECTOR) or "").strip()
+                if new_email and "@" in new_email:
+                    if not old_email or new_email != old_email or attempt >= 3:
+                        logger.info(f"✓ Đã tạo/lấy email mới thành công: {new_email}")
+                        return new_email
+                await asyncio.sleep(0.5)
+
+            logger.warning(f"Lần thử {attempt}/{max_retries}: Chưa xuất hiện email mới khác email cũ.")
+        except Exception as e:
+            logger.warning(f"Lần thử {attempt}/{max_retries} chờ email mới bị quá giờ hoặc lỗi: {e}")
+            try:
+                # Nếu trang bị treo hoặc kẹt, reload lại
+                await email_page.reload(wait_until="domcontentloaded", timeout=10000)
+            except Exception:
+                pass
+            await asyncio.sleep(1)
+
+    # Nếu sau tất cả các lần thử vẫn chưa có email mới khác cũ, thử đọc lại lần cuối
+    try:
+        final_val = (await email_page.input_value(EMAIL_INPUT_SELECTOR) or "").strip()
+        if final_val and "@" in final_val:
+            logger.info(f"Sử dụng email thu được sau các lần thử: {final_val}")
+            return final_val
+    except Exception:
+        pass
+
+    # Thử gọi get_current_email như phương án dự phòng
+    return await get_current_email(email_page, timeout=8000)
 
 
 async def get_messages(email_page: Page) -> List[Dict[str, Any]]:

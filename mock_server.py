@@ -229,6 +229,7 @@ class MockServer:
         if self.running:
             return
         try:
+            socketserver.TCPServer.allow_reuse_address = True
             self.httpd = socketserver.TCPServer((self.host, self.port), MockTargetHandler)
             self.running = True
             self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)

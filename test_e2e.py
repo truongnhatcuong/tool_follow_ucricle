@@ -8,7 +8,7 @@ import time
 from unittest.mock import MagicMock, AsyncMock
 
 import selectors
-from email_service import find_verification_email
+from email_service import find_verification_email, create_next_email, get_current_email
 from mock_server import MockServer
 import httpx
 
@@ -84,6 +84,44 @@ class TestMockServer(unittest.TestCase):
         # 3. Verify Correct OTP
         res_ok = httpx.post("http://127.0.0.1:5001/api/verify-otp", json={"email": "test@domain.com", "otp": otp})
         self.assertTrue(res_ok.json()["success"])
+
+
+class TestEmailServiceResilience(unittest.IsolatedAsyncioTestCase):
+    async def test_create_next_email_retries_on_timeout(self):
+        mock_page = AsyncMock()
+        mock_page.url = "https://10minutemail.net/"
+        # Old email
+        mock_page.input_value.side_effect = [
+            "old@10minutemail.net",   # read old email
+            # Attempt 1: wait_for_selector raises TimeoutError
+            # Attempt 2:
+            "new_email_123@10minutemail.net",
+        ]
+        
+        # 1st wait_for_selector fails with TimeoutError, 2nd succeeds
+        mock_page.wait_for_selector.side_effect = [
+            Exception("Timeout 25000ms exceeded waiting for locator('#fe_text')"),
+            None,
+        ]
+        mock_page.query_selector.return_value = None
+
+        email = await create_next_email(mock_page, timeout=4000, max_retries=2)
+        self.assertEqual(email, "new_email_123@10minutemail.net")
+        self.assertEqual(mock_page.wait_for_selector.call_count, 2)
+
+    async def test_get_current_email_recovers_after_timeout(self):
+        mock_page = AsyncMock()
+        mock_page.url = "https://10minutemail.net/"
+        # 1st attempt fails, reload, 2nd attempt succeeds
+        mock_page.wait_for_selector.side_effect = [
+            Exception("Timeout 7500ms exceeded"),
+            None,
+        ]
+        mock_page.input_value.return_value = "recovered@10minutemail.net"
+
+        email = await get_current_email(mock_page, timeout=4000)
+        self.assertEqual(email, "recovered@10minutemail.net")
+        mock_page.reload.assert_called_once()
 
 
 if __name__ == "__main__":
