@@ -19,13 +19,15 @@
         "https://ucircle.net/app/c/6410c9cd-71d6-4b80-9e76-ef0060da10c0",
         "https://ucircle.net/app/c/9e158d37-a7f9-4669-8520-07f4d9bbd33f",
         "https://ucircle.net/app/c/e3500793-72a2-4c0e-b7b0-4d865eddcbe3",
-        "https://ucircle.net/app/c/aababdcc-7e2d-44b0-b56c-b1636d774032"
+        "https://ucircle.net/app/c/aababdcc-7e2d-44b0-b56c-b1636d774032",
+        "https://ucircle.net/app/u/de28d31e-eb02-4b96-b01c-90dd82c8cf9b",
+        "https://ucircle.net/app/u/78a719c4-a7aa-4dc5-b77f-066747b94ff9"
     ],
     "delay_between_workflows": 5.0,
     "delay_between_circles": 1.0,
     "total_workflows": 1000,
     "refresh_interval": 25,
-    "otp_timeout": 120,
-    "headless": false,
+    "otp_timeout": 180,
+    "headless": true,
     "target_url": "https://ucircle.net/auth/login"
 }

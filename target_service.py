@@ -37,6 +37,7 @@ from selectors import (
     CIRCLE_JOIN_BUTTON_SELECTOR,
     TARGET_LOGOUT_BUTTON_SELECTOR,
     TARGET_CHANGE_EMAIL_BUTTON_SELECTOR,
+    USER_FOLLOW_BUTTON_SELECTOR,
 )
 
 logger = logging.getLogger("TargetService")
@@ -519,79 +520,122 @@ async def process_circles(
         if not url:
             continue
 
-        prefix_log = f"Circle [{idx}/{total}]"
+        is_user_profile = "/app/u/" in url
+        prefix_log = f"{'Profile' if is_user_profile else 'Circle'} [{idx}/{total}]"
         try:
             if log_cb:
                 log_cb(f"{prefix_log}: Điều hướng tới {url}...")
 
             await target_page.goto(url, wait_until="domcontentloaded", timeout=25000)
 
-            # Chờ nhanh nút Theo dõi hoặc Tham gia hiển thị (không sleep tĩnh lâu)
-            try:
-                await target_page.wait_for_selector(
-                    f"{CIRCLE_FOLLOW_BUTTON_SELECTOR}, {CIRCLE_JOIN_BUTTON_SELECTOR}, {CIRCLE_CTA_CONTAINER_SELECTOR}",
-                    state="visible",
-                    timeout=3500
-                )
-            except Exception:
-                pass
-
-            # Đệm ngắn đảm bảo DOM đã gắn event handler
-            await asyncio.sleep(0.3)
-
-            # BƯỚC A: Bấm "Theo dõi" trước
-            follow_btn = await target_page.query_selector(CIRCLE_FOLLOW_BUTTON_SELECTOR)
-            if follow_btn and await follow_btn.is_visible():
-                is_following = await follow_btn.get_attribute("data-following")
-                aria_pressed = await follow_btn.get_attribute("aria-pressed")
-                btn_text = (await follow_btn.inner_text()).strip().lower()
-                
-                if is_following != "true" and aria_pressed != "true" and "đang theo dõi" not in btn_text:
-                    if log_cb:
-                        log_cb(f"{prefix_log}: Bấm 'Theo dõi'...")
-                    await follow_btn.click()
-                    await asyncio.sleep(0.35)
-                    if log_cb:
-                        log_cb(f"{prefix_log}: ✓ Đã theo dõi thành công")
-                else:
-                    if log_cb:
-                        log_cb(f"{prefix_log}: Đã theo dõi từ trước")
-            else:
-                if log_cb:
-                    log_cb(f"{prefix_log}: Không tìm thấy nút 'Theo dõi' hoặc đã theo dõi")
-
-            # BƯỚC B: Bấm "＋ Tham gia" sau
-            join_btn = await target_page.query_selector(CIRCLE_JOIN_BUTTON_SELECTOR)
-            if join_btn and await join_btn.is_visible():
-                if log_cb:
-                    log_cb(f"{prefix_log}: Bấm '＋ Tham gia'...")
-                await join_btn.click()
-                await asyncio.sleep(0.4)
-
-                # Kiểm tra nhanh xem có popup/dialog xác nhận tham gia hay không
+            # ========================================================
+            # TRƯỜNG HỢP 1: TRANG CÁ NHÂN (/app/u/...)
+            # ========================================================
+            if is_user_profile:
                 try:
-                    confirm_btn = await target_page.query_selector(
-                        "button[data-join-confirm='true'], div[role='dialog'] button:has-text('Tham gia'), div[role='dialog'] button:has-text('Xác nhận')"
+                    await target_page.wait_for_selector(
+                        f"{USER_FOLLOW_BUTTON_SELECTOR}, button:has-text('Theo dõi'), button:has-text('Đang theo dõi')",
+                        state="visible",
+                        timeout=4000
                     )
-                    if confirm_btn and await confirm_btn.is_visible():
-                        await confirm_btn.click()
-                        await asyncio.sleep(0.3)
                 except Exception:
                     pass
 
-                if log_cb:
-                    log_cb(f"{prefix_log}: ✓ Đã tham gia thành công")
-            else:
-                if log_cb:
-                    log_cb(f"{prefix_log}: Không tìm thấy nút '＋ Tham gia' (có thể đã là thành viên)")
+                await asyncio.sleep(0.3)
 
-            success_count += 1
+                follow_btn = await target_page.query_selector(
+                    f"{USER_FOLLOW_BUTTON_SELECTOR}, button:has-text('Theo dõi'), button:has-text('Đang theo dõi')"
+                )
+                if follow_btn and await follow_btn.is_visible():
+                    follow_state = await follow_btn.get_attribute("data-pp-follow-state")
+                    aria_pressed = await follow_btn.get_attribute("aria-pressed")
+                    btn_text = (await follow_btn.inner_text()).strip().lower()
+
+                    if follow_state != "following" and aria_pressed != "true" and "đang theo dõi" not in btn_text:
+                        if log_cb:
+                            log_cb(f"{prefix_log}: Bấm 'Theo dõi' trang cá nhân...")
+                        await follow_btn.click()
+                        await asyncio.sleep(0.35)
+                        if log_cb:
+                            log_cb(f"{prefix_log}: ✓ Đã theo dõi trang cá nhân thành công")
+                    else:
+                        if log_cb:
+                            log_cb(f"{prefix_log}: Đã theo dõi trang cá nhân từ trước")
+                else:
+                    if log_cb:
+                        log_cb(f"{prefix_log}: Không tìm thấy nút 'Theo dõi' trang cá nhân")
+
+                success_count += 1
+
+            # ========================================================
+            # TRƯỜNG HỢP 2: TRANG CIRCLE CỘNG ĐỒNG (/app/c/...)
+            # ========================================================
+            else:
+                # Chờ nhanh nút Theo dõi hoặc Tham gia hiển thị
+                try:
+                    await target_page.wait_for_selector(
+                        f"{CIRCLE_FOLLOW_BUTTON_SELECTOR}, {CIRCLE_JOIN_BUTTON_SELECTOR}, {CIRCLE_CTA_CONTAINER_SELECTOR}",
+                        state="visible",
+                        timeout=3500
+                    )
+                except Exception:
+                    pass
+
+                await asyncio.sleep(0.3)
+
+                # BƯỚC A: Bấm "Theo dõi" trước
+                follow_btn = await target_page.query_selector(CIRCLE_FOLLOW_BUTTON_SELECTOR)
+                if follow_btn and await follow_btn.is_visible():
+                    is_following = await follow_btn.get_attribute("data-following")
+                    aria_pressed = await follow_btn.get_attribute("aria-pressed")
+                    btn_text = (await follow_btn.inner_text()).strip().lower()
+                    
+                    if is_following != "true" and aria_pressed != "true" and "đang theo dõi" not in btn_text:
+                        if log_cb:
+                            log_cb(f"{prefix_log}: Bấm 'Theo dõi'...")
+                        await follow_btn.click()
+                        await asyncio.sleep(0.35)
+                        if log_cb:
+                            log_cb(f"{prefix_log}: ✓ Đã theo dõi thành công")
+                    else:
+                        if log_cb:
+                            log_cb(f"{prefix_log}: Đã theo dõi từ trước")
+                else:
+                    if log_cb:
+                        log_cb(f"{prefix_log}: Không tìm thấy nút 'Theo dõi' hoặc đã theo dõi")
+
+                # BƯỚC B: Bấm "＋ Tham gia" sau
+                join_btn = await target_page.query_selector(CIRCLE_JOIN_BUTTON_SELECTOR)
+                if join_btn and await join_btn.is_visible():
+                    if log_cb:
+                        log_cb(f"{prefix_log}: Bấm '＋ Tham gia'...")
+                    await join_btn.click()
+                    await asyncio.sleep(0.4)
+
+                    # Kiểm tra nhanh xem có popup/dialog xác nhận tham gia hay không
+                    try:
+                        confirm_btn = await target_page.query_selector(
+                            "button[data-join-confirm='true'], div[role='dialog'] button:has-text('Tham gia'), div[role='dialog'] button:has-text('Xác nhận')"
+                        )
+                        if confirm_btn and await confirm_btn.is_visible():
+                            await confirm_btn.click()
+                            await asyncio.sleep(0.3)
+                    except Exception:
+                        pass
+
+                    if log_cb:
+                        log_cb(f"{prefix_log}: ✓ Đã tham gia thành công")
+                else:
+                    if log_cb:
+                        log_cb(f"{prefix_log}: Không tìm thấy nút '＋ Tham gia' (có thể đã là thành viên)")
+
+                success_count += 1
 
             if idx < total and delay_between_circles > 0:
                 await asyncio.sleep(delay_between_circles)
 
         except Exception as e:
-            err_msg = f"{prefix_log}: Lỗi khi xử lý Circle {url}: {e}"
+            err_msg = f"{prefix_log}: Lỗi khi xử lý {url}: {e}"
             logger.error(err_msg)
             if log_cb:
                 log_cb(err_msg)

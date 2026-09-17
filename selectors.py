@@ -182,3 +182,14 @@ CIRCLE_JOIN_BUTTON_SELECTOR = (
     "button[data-join-open='true'], button:has-text('Tham gia')"
 )
 
+# ==========================================
+# 5. SELECTORS CHO TRANG CÁ NHÂN USER PROFILE (/app/u/...)
+# ==========================================
+
+# Nút "Theo dõi" trên trang cá nhân
+USER_FOLLOW_BUTTON_SELECTOR = (
+    "button[data-pp-follow='true'], button[data-pp-follow-state='follow'], "
+    "button[data-pp-follow-state]:has-text('Theo dõi'), button[class*='_btn_'][data-pp-follow='true']"
+)
+
+
