@@ -49,6 +49,7 @@ logger = logging.getLogger("AutomationWorker")
 class AutomationWorker:
     def __init__(
         self,
+        worker_id: int = 1,
         total_workflows: int = 20,
         refresh_interval: int = 20,
         otp_timeout: int = 120,
@@ -63,6 +64,7 @@ class AutomationWorker:
         custom_selectors: Optional[Dict[str, str]] = None,
         ui_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None
     ):
+        self.worker_id = int(worker_id)
         self.total_workflows = int(total_workflows)
         self.refresh_interval = int(refresh_interval)
         self.otp_timeout = int(otp_timeout)
@@ -94,51 +96,23 @@ class AutomationWorker:
 
     def log(self, message: str):
         now_str = datetime.now().strftime("%H:%M:%S")
-        full_line = f"{now_str} {message}"
+        full_line = f"{now_str} [Luồng {self.worker_id}] {message}"
         logger.info(full_line)
         if self.ui_callback:
-            self.ui_callback("log", {"line": full_line})
+            self.ui_callback("log", {"line": full_line, "worker_id": self.worker_id})
 
     def update_ui_status(self, status: str):
         if self.ui_callback:
-            self.ui_callback("status", {"status": status})
+            self.ui_callback("status", {"status": status, "worker_id": self.worker_id})
 
     def update_ui_progress(self, current: int, total: int, email: str = ""):
         if self.ui_callback:
-            self.ui_callback("progress", {
-                "current": current,
-                "total": total,
-                "email": email
-            })
+            self.ui_callback("progress", {"current": current, "total": total, "email": email, "worker_id": self.worker_id})
 
-    def update_ui_checklist(
-        self,
-        register: Optional[str] = None,
-        send_otp: Optional[str] = None,
-        waiting_email: Optional[str] = None,
-        refresh_count: Optional[int] = None,
-        otp: Optional[str] = None,
-        verify: Optional[str] = None,
-        tasks: Optional[str] = None
-    ):
-        data = {}
-        if register is not None:
-            data["register"] = register
-        if send_otp is not None:
-            data["send_otp"] = send_otp
-        if waiting_email is not None:
-            data["waiting_email"] = waiting_email
-        if refresh_count is not None:
-            data["refresh_count"] = refresh_count
-        if otp is not None:
-            data["otp"] = otp
-        if verify is not None:
-            data["verify"] = verify
-        if tasks is not None:
-            data["tasks"] = tasks
-
-        if self.ui_callback and data:
-            self.ui_callback("checklist", data)
+    def update_ui_checklist(self, **kwargs):
+        if self.ui_callback and kwargs:
+            kwargs["worker_id"] = self.worker_id
+            self.ui_callback("checklist", kwargs)
 
     def pause(self):
         self.is_paused = True

@@ -35,13 +35,15 @@
         "https://ucircle.net/app/c/6a762132-74b4-4b70-b6ba-5f4b3b3ae822",
         "https://ucircle.net/app/c/73b742ad-fd94-4970-a34f-dd47819a0e73",
         "https://ucircle.net/app/c/58296d55-26d7-4d85-8474-d6bd6be06021",
-        "https://ucircle.net/app/c/d159b031-169d-4b4d-a2af-e8087b84a1fb"
+        "https://ucircle.net/app/c/d159b031-169d-4b4d-a2af-e8087b84a1fb",
+        "https://ucircle.net/app/c/cc3da9ca-99a5-4111-ae18-cde95294cdda"
     ],
     "delay_between_workflows": 5.0,
     "delay_between_circles": 1.0,
+    "max_workers": 5,
     "total_workflows": 1000,
     "refresh_interval": 30,
     "otp_timeout": 120,
-    "headless": true,
+    "headless": false,
     "target_url": "https://ucircle.net/auth/login"
 }

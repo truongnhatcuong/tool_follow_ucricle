@@ -84,8 +84,8 @@ async def create_next_email(email_page: Page, timeout: int = 30000, max_retries:
         pass
 
     logger.info(f"Bắt đầu quy trình tạo email mới (email hiện tại: {old_email or 'None'})")
-
-    per_attempt_timeout = max(7000, timeout // max_retries)
+    # Chia nhỏ tổng thời gian chờ thành các lần poll ngắn hơn để có thể reload
+    per_attempt_timeout = max(10000, timeout // max_retries)
 
     for attempt in range(1, max_retries + 1):
         logger.info(f"Tạo email mới - Lần thử {attempt}/{max_retries}...")

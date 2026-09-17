@@ -37,8 +37,8 @@ class AutomationApp(ctk.CTk):
         self.minsize(980, 800)
 
         # Worker & Threading state
-        self.worker = None
-        self.worker_thread = None
+        self.workers = []
+        self.worker_threads = []
         self.msg_queue = queue.Queue()
         self.mock_server = get_mock_server()
         self.app_config = load_config()
@@ -252,61 +252,68 @@ class AutomationApp(ctk.CTk):
             text_color="#38bdf8"
         ).grid(row=0, column=0, columnspan=3, padx=12, pady=(8, 4), sticky="w")
 
+        # 0. Number of workers (Luồng)
+        ctk.CTkLabel(config_card, text="Số luồng chạy song song:").grid(row=1, column=0, padx=12, pady=2, sticky="w")
+        self.ent_workers = ctk.CTkEntry(config_card, width=70)
+        self.ent_workers.insert(0, str(self.app_config.get("max_workers", 1)))
+        self.ent_workers.grid(row=1, column=1, padx=6, pady=2, sticky="w")
+        ctk.CTkLabel(config_card, text="luồng", text_color="#94a3b8").grid(row=1, column=2, padx=4, pady=2, sticky="w")
+
         # 1. Number of workflows
-        ctk.CTkLabel(config_card, text="Số lượng workflows:").grid(row=1, column=0, padx=12, pady=2, sticky="w")
+        ctk.CTkLabel(config_card, text="Số lượng workflows / luồng:").grid(row=2, column=0, padx=12, pady=2, sticky="w")
         self.ent_workflows = ctk.CTkEntry(config_card, width=70)
         self.ent_workflows.insert(0, str(self.app_config.get("total_workflows", 20)))
-        self.ent_workflows.grid(row=1, column=1, padx=6, pady=2, sticky="w")
+        self.ent_workflows.grid(row=2, column=1, padx=6, pady=2, sticky="w")
 
         # 2. Inbox refresh interval
-        ctk.CTkLabel(config_card, text="Chu kỳ refresh email:").grid(row=2, column=0, padx=12, pady=2, sticky="w")
+        ctk.CTkLabel(config_card, text="Chu kỳ refresh email:").grid(row=3, column=0, padx=12, pady=2, sticky="w")
         self.ent_refresh_interval = ctk.CTkEntry(config_card, width=70)
         self.ent_refresh_interval.insert(0, str(self.app_config.get("refresh_interval", 15)))
-        self.ent_refresh_interval.grid(row=2, column=1, padx=6, pady=2, sticky="w")
-        ctk.CTkLabel(config_card, text="giây", text_color="#94a3b8").grid(row=2, column=2, padx=4, pady=2, sticky="w")
-
-        # 3. OTP timeout
-        ctk.CTkLabel(config_card, text="Thời gian chờ OTP tối đa:").grid(row=3, column=0, padx=12, pady=2, sticky="w")
-        self.ent_otp_timeout = ctk.CTkEntry(config_card, width=70)
-        self.ent_otp_timeout.insert(0, str(self.app_config.get("otp_timeout", 120)))
-        self.ent_otp_timeout.grid(row=3, column=1, padx=6, pady=2, sticky="w")
+        self.ent_refresh_interval.grid(row=3, column=1, padx=6, pady=2, sticky="w")
         ctk.CTkLabel(config_card, text="giây", text_color="#94a3b8").grid(row=3, column=2, padx=4, pady=2, sticky="w")
 
-        # 4. Delay between workflows (Nghỉ giữa các tài khoản)
-        ctk.CTkLabel(config_card, text="Nghỉ ngơi giữa các tài khoản:").grid(row=4, column=0, padx=12, pady=2, sticky="w")
-        self.ent_delay_workflows = ctk.CTkEntry(config_card, width=70)
-        self.ent_delay_workflows.insert(0, str(self.app_config.get("delay_between_workflows", 5)))
-        self.ent_delay_workflows.grid(row=4, column=1, padx=6, pady=2, sticky="w")
+        # 3. OTP timeout
+        ctk.CTkLabel(config_card, text="Thời gian chờ OTP tối đa:").grid(row=4, column=0, padx=12, pady=2, sticky="w")
+        self.ent_otp_timeout = ctk.CTkEntry(config_card, width=70)
+        self.ent_otp_timeout.insert(0, str(self.app_config.get("otp_timeout", 120)))
+        self.ent_otp_timeout.grid(row=4, column=1, padx=6, pady=2, sticky="w")
         ctk.CTkLabel(config_card, text="giây", text_color="#94a3b8").grid(row=4, column=2, padx=4, pady=2, sticky="w")
 
-        # 5. Delay between circles
-        ctk.CTkLabel(config_card, text="Nghỉ giữa mỗi Circle:").grid(row=5, column=0, padx=12, pady=2, sticky="w")
-        self.ent_delay_circles = ctk.CTkEntry(config_card, width=70)
-        self.ent_delay_circles.insert(0, str(self.app_config.get("delay_between_circles", 1)))
-        self.ent_delay_circles.grid(row=5, column=1, padx=6, pady=2, sticky="w")
+        # 4. Delay between workflows (Nghỉ giữa các tài khoản)
+        ctk.CTkLabel(config_card, text="Nghỉ ngơi giữa các tài khoản:").grid(row=5, column=0, padx=12, pady=2, sticky="w")
+        self.ent_delay_workflows = ctk.CTkEntry(config_card, width=70)
+        self.ent_delay_workflows.insert(0, str(self.app_config.get("delay_between_workflows", 5)))
+        self.ent_delay_workflows.grid(row=5, column=1, padx=6, pady=2, sticky="w")
         ctk.CTkLabel(config_card, text="giây", text_color="#94a3b8").grid(row=5, column=2, padx=4, pady=2, sticky="w")
 
+        # 5. Delay between circles
+        ctk.CTkLabel(config_card, text="Nghỉ giữa mỗi Circle:").grid(row=6, column=0, padx=12, pady=2, sticky="w")
+        self.ent_delay_circles = ctk.CTkEntry(config_card, width=70)
+        self.ent_delay_circles.insert(0, str(self.app_config.get("delay_between_circles", 1)))
+        self.ent_delay_circles.grid(row=6, column=1, padx=6, pady=2, sticky="w")
+        ctk.CTkLabel(config_card, text="giây", text_color="#94a3b8").grid(row=6, column=2, padx=4, pady=2, sticky="w")
+
         # 6. Headless mode
-        ctk.CTkLabel(config_card, text="Headless Mode:").grid(row=6, column=0, padx=12, pady=2, sticky="w")
+        ctk.CTkLabel(config_card, text="Headless Mode:").grid(row=7, column=0, padx=12, pady=2, sticky="w")
         self.sw_headless = ctk.CTkSwitch(config_card, text="OFF (Mở trình duyệt trực tiếp)")
         if self.app_config.get("headless", False):
             self.sw_headless.select()
             self.sw_headless.configure(text="ON (Chạy ngầm ẩn)")
-        self.sw_headless.grid(row=6, column=1, columnspan=2, padx=6, pady=2, sticky="w")
+        self.sw_headless.grid(row=7, column=1, columnspan=2, padx=6, pady=2, sticky="w")
         self.sw_headless.configure(command=self._on_headless_toggle)
 
         # 7. Target URL
-        ctk.CTkLabel(config_card, text="Target Website URL:").grid(row=7, column=0, padx=12, pady=2, sticky="w")
+        ctk.CTkLabel(config_card, text="Target Website URL:").grid(row=8, column=0, padx=12, pady=2, sticky="w")
         self.ent_target_url = ctk.CTkEntry(config_card, width=320)
         self.ent_target_url.insert(0, self.app_config.get("target_url", DEFAULT_TARGET_URL))
-        self.ent_target_url.grid(row=7, column=1, columnspan=2, padx=6, pady=2, sticky="ew")
+        self.ent_target_url.grid(row=8, column=1, columnspan=2, padx=6, pady=2, sticky="ew")
 
         # 8. AI API Key
-        ctk.CTkLabel(config_card, text="AI API Key:").grid(row=8, column=0, padx=12, pady=(2, 8), sticky="w")
+        ctk.CTkLabel(config_card, text="AI API Key:").grid(row=9, column=0, padx=12, pady=(2, 8), sticky="w")
         self.ent_api_key = ctk.CTkEntry(config_card, width=320, placeholder_text="Dán key AI vào đây...")
         if self.app_config.get("api_key_ai"):
             self.ent_api_key.insert(0, self.app_config.get("api_key_ai"))
-        self.ent_api_key.grid(row=8, column=1, columnspan=2, padx=6, pady=(2, 8), sticky="ew")
+        self.ent_api_key.grid(row=9, column=1, columnspan=2, padx=6, pady=(2, 8), sticky="ew")
 
         # ----------------------------------------------------
         # CARD 2: FORM CHUYÊN DỤNG QUẢN LÝ CIRCLE URLS
@@ -451,6 +458,7 @@ class AutomationApp(ctk.CTk):
         self.app_config["api_key_ai"] = self.ent_api_key.get().strip()
         self.app_config["target_url"] = self.ent_target_url.get().strip() or DEFAULT_TARGET_URL
         try:
+            self.app_config["max_workers"] = int(self.ent_workers.get().strip() or "1")
             self.app_config["delay_between_workflows"] = float(self.ent_delay_workflows.get().strip() or "5")
             self.app_config["delay_between_circles"] = float(self.ent_delay_circles.get().strip() or "1")
             self.app_config["total_workflows"] = int(self.ent_workflows.get().strip() or "20")
@@ -482,54 +490,85 @@ class AutomationApp(ctk.CTk):
 
     def _process_queue(self):
         try:
+            if not hasattr(self, "worker_states"):
+                self.worker_states = {}
+                self.worker_progress = {}
+
             while not self.msg_queue.empty():
                 event_type, data = self.msg_queue.get_nowait()
+                worker_id = data.get("worker_id", 1)
 
                 if event_type == "log":
                     self.append_log(data.get("line", ""))
 
                 elif event_type == "status":
                     status = data.get("status", "IDLE")
+                    self.worker_states[worker_id] = status
+
+                    # Tính toán global status
+                    active_states = self.worker_states.values()
+                    if "RUNNING" in active_states:
+                        global_status = "RUNNING"
+                    elif "PAUSED" in active_states:
+                        global_status = "PAUSED"
+                    elif "ERROR" in active_states:
+                        global_status = "ERROR"
+                    elif all(s == "COMPLETED" for s in active_states) and active_states:
+                        global_status = "COMPLETED"
+                    elif all(s in ["STOPPED", "IDLE", "COMPLETED"] for s in active_states) and active_states:
+                        global_status = "STOPPED"
+                    else:
+                        global_status = "IDLE"
+
                     color_map = {
-                        "RUNNING": ("#10b981", "Status: ● RUNNING"),
-                        "PAUSED": ("#f59e0b", "Status: ● PAUSED"),
-                        "STOPPED": ("#ef4444", "Status: ● STOPPED"),
-                        "COMPLETED": ("#06b6d4", "Status: ● COMPLETED"),
-                        "ERROR": ("#dc2626", "Status: ● ERROR"),
-                        "IDLE": ("#94a3b8", "Status: ● IDLE"),
+                        "RUNNING": ("#10b981", f"Status: ● RUNNING"),
+                        "PAUSED": ("#f59e0b", f"Status: ● PAUSED"),
+                        "STOPPED": ("#ef4444", f"Status: ● STOPPED"),
+                        "COMPLETED": ("#06b6d4", f"Status: ● COMPLETED"),
+                        "ERROR": ("#dc2626", f"Status: ● ERROR"),
+                        "IDLE": ("#94a3b8", f"Status: ● IDLE"),
                     }
-                    color, text = color_map.get(status, ("#94a3b8", f"Status: ● {status}"))
+                    color, text = color_map.get(global_status, ("#94a3b8", f"Status: ● {global_status}"))
                     self.status_label.configure(text=text, text_color=color)
 
-                    if status in ["STOPPED", "COMPLETED", "ERROR", "IDLE"]:
+                    if global_status in ["STOPPED", "COMPLETED", "ERROR", "IDLE"]:
                         self.btn_start.configure(state="normal")
                         self.btn_start_big.configure(state="normal")
                         self.btn_pause.configure(state="disabled", text="PAUSE")
                         self.btn_stop.configure(state="disabled")
-                    elif status == "RUNNING":
+                    elif global_status == "RUNNING":
                         self.btn_start.configure(state="disabled")
                         self.btn_start_big.configure(state="disabled")
                         self.btn_pause.configure(state="normal", text="PAUSE")
                         self.btn_stop.configure(state="normal")
-                    elif status == "PAUSED":
+                    elif global_status == "PAUSED":
                         self.btn_pause.configure(state="normal", text="RESUME")
 
                 elif event_type == "progress":
                     current = data.get("current", 0)
                     total = data.get("total", 0)
                     email = data.get("email", "")
-                    self.lbl_workflow.configure(text=f"{current} / {total}")
+                    
+                    self.worker_progress[worker_id] = (current, total, email)
+                    
+                    total_current = sum(p[0] for p in self.worker_progress.values())
+                    total_total = sum(p[1] for p in self.worker_progress.values())
+                    self.lbl_workflow.configure(text=f"{total_current} / {total_total}")
+                    
                     if email:
-                        self.lbl_email.configure(text=email)
+                        self.lbl_email.configure(text=f"[L{worker_id}] {email}")
 
                 elif event_type == "checklist":
+                    # Cập nhật checklist cho luồng cuối cùng thay đổi trạng thái
                     for key, val in data.items():
+                        if key == "worker_id":
+                            continue
                         lbl_key = f"lbl_{key}"
                         if lbl_key in self.check_labels:
                             display_val = str(val)
                             if key == "refresh_count":
                                 display_val = f"{val} lần"
-                            self.check_labels[lbl_key].configure(text=display_val)
+                            self.check_labels[lbl_key].configure(text=f"[L{worker_id}] {display_val}")
 
         except Exception as e:
             print(f"Error in UI queue processing: {e}")
@@ -538,6 +577,7 @@ class AutomationApp(ctk.CTk):
 
     def on_start_clicked(self):
         try:
+            max_workers = int(self.ent_workers.get().strip() or "1")
             workflows = int(self.ent_workflows.get().strip() or "20")
             refresh_interval = int(self.ent_refresh_interval.get().strip() or "15")
             otp_timeout = int(self.ent_otp_timeout.get().strip() or "120")
@@ -560,6 +600,7 @@ class AutomationApp(ctk.CTk):
             "circle_urls": circle_urls,
             "delay_between_workflows": delay_workflows,
             "delay_between_circles": delay_circles,
+            "max_workers": max_workers,
             "total_workflows": workflows,
             "refresh_interval": refresh_interval,
             "otp_timeout": otp_timeout,
@@ -573,45 +614,64 @@ class AutomationApp(ctk.CTk):
         if "127.0.0.1:5000" in target_url:
             self.mock_server.start()
 
-        self.worker = AutomationWorker(
-            total_workflows=workflows,
-            refresh_interval=refresh_interval,
-            otp_timeout=otp_timeout,
-            headless=headless,
-            target_url=target_url,
-            circle_urls=circle_urls,
-            delay_between_workflows=delay_workflows,
-            delay_between_circles=delay_circles,
-            api_key_ai=api_key_ai,
-            ai_base_url=new_cfg.get("ai_base_url", "https://api1.shupremium.com/v1"),
-            ai_model=new_cfg.get("ai_model", "gpt-4o-mini"),
-            ui_callback=self.ui_callback
-        )
+        self.workers = []
+        self.worker_threads = []
 
-        def run_worker_thread():
-            asyncio.run(self.worker.run())
+        self.append_log(f"Bắt đầu khởi chạy {max_workers} luồng tự động hóa...")
 
-        self.worker_thread = threading.Thread(target=run_worker_thread, daemon=True)
-        self.worker_thread.start()
+        for i in range(max_workers):
+            worker_id = i + 1
+            worker = AutomationWorker(
+                worker_id=worker_id,
+                total_workflows=workflows,
+                refresh_interval=refresh_interval,
+                otp_timeout=otp_timeout,
+                headless=headless,
+                target_url=target_url,
+                circle_urls=circle_urls,
+                delay_between_workflows=delay_workflows,
+                delay_between_circles=delay_circles,
+                api_key_ai=api_key_ai,
+                ai_base_url=new_cfg.get("ai_base_url", "https://api1.shupremium.com/v1"),
+                ai_model=new_cfg.get("ai_model", "gpt-4o-mini"),
+                ui_callback=self.ui_callback
+            )
+            self.workers.append(worker)
+
+            def run_worker_thread(w=worker, start_delay=(worker_id - 1) * 4):
+                async def delayed_run():
+                    if start_delay > 0:
+                        w.log(f"Đang chờ {start_delay}s để tránh quá tải khi khởi động luồng...")
+                        await asyncio.sleep(start_delay)
+                    await w.run()
+                asyncio.run(delayed_run())
+
+            t = threading.Thread(target=run_worker_thread, daemon=True)
+            self.worker_threads.append(t)
+            t.start()
 
     def on_pause_clicked(self):
-        if not self.worker:
+        if not self.workers:
             return
-        if self.worker.is_paused:
-            self.worker.resume()
-        else:
-            self.worker.pause()
+        
+        # Lấy trạng thái từ worker đầu tiên làm chuẩn
+        is_paused = self.workers[0].is_paused
+        for worker in self.workers:
+            if is_paused:
+                worker.resume()
+            else:
+                worker.pause()
 
     def on_stop_clicked(self):
-        if self.worker:
-            self.worker.stop()
+        for worker in self.workers:
+            worker.stop()
         sleep_preventer.allow_sleep()
 
     def on_closing(self):
         """Dọn dẹp tài nguyên và khôi phục chế độ sleep khi đóng cửa sổ ứng dụng"""
         try:
-            if self.worker:
-                self.worker.stop()
+            for worker in self.workers:
+                worker.stop()
             sleep_preventer.allow_sleep()
         except Exception:
             pass
