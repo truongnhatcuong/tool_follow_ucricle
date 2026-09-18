@@ -451,6 +451,12 @@ class AutomationApp(ctk.CTk):
 
     def append_log(self, text: str):
         self.log_textbox.insert("end", text + "\n")
+        try:
+            num_lines = int(self.log_textbox.index('end-1c').split('.')[0])
+            if num_lines > 500:
+                self.log_textbox.delete("1.0", f"{num_lines - 500}.0")
+        except Exception:
+            pass
         self.log_textbox.see("end")
 
     def clear_log(self):
@@ -539,9 +545,11 @@ class AutomationApp(ctk.CTk):
                 self.worker_states = {}
                 self.worker_progress = {}
 
-            while not self.msg_queue.empty():
+            count = 0
+            while not self.msg_queue.empty() and count < 30:
                 event_type, data = self.msg_queue.get_nowait()
                 worker_id = data.get("worker_id", 1)
+                count += 1
 
                 if event_type == "log":
                     self.append_log(data.get("line", ""))
