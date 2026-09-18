@@ -1,13 +1,8 @@
 """
 Module gui.py
 Giao diện người dùng đồ họa (GUI) xây dựng bằng CustomTkinter:
-- Khớp chính xác mockup ASCII: Status, Progress, Checklist trực tiếp, Điều khiển và Hộp Log cuộn
-- Khung cấu hình chi tiết: Số workflows, Refresh interval, OTP timeout, Nghỉ giữa tài khoản, Nghỉ giữa Circle
-- Form chuyên dụng Quản lý danh sách Circle URLs:
-  + Hiển thị rõ ràng từng dòng URL
-  + Đếm số lượng Circle (Badge)
-  + Nút thêm nhanh Circle, Dán từ Clipboard, Xóa hết
-  + Nút [ Lưu Danh Sách ] lưu trực tiếp vào config.json
+- Tách biệt cấu hình 10MinMail và TempMail API qua Tabview
+- Cấu hình dùng chung: Headless, Target URL, AI API Key, Circle URLs
 """
 
 import sys
@@ -20,9 +15,11 @@ import customtkinter as ctk
 
 from selectors import DEFAULT_TARGET_URL
 from automation_worker import AutomationWorker
+from automation_worker_api import AutomationWorkerAPI
 from mock_server import get_mock_server
 from config import load_config, save_config
 from sleep_preventer import sleep_preventer
+from api_rate_limiter import global_rate_limiter
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -33,20 +30,24 @@ class AutomationApp(ctk.CTk):
         super().__init__()
 
         self.title("Automation Tool - UCircle Auto Creator & Circle Joiner")
-        self.geometry("1100, 890")
-        self.minsize(980, 800)
+        self.geometry("1150, 950")
+        self.minsize(1050, 900)
 
-        # Worker & Threading state
         self.workers = []
         self.worker_threads = []
         self.msg_queue = queue.Queue()
         self.mock_server = get_mock_server()
         self.app_config = load_config()
 
-        # Tạo giao diện
         self._create_ui()
 
-        # Xử lý message queue an toàn trên UI thread
+        # Đặt tab mặc định theo config
+        default_mode = self.app_config.get("email_mode", "TempMail (API)")
+        try:
+            self.mode_tabs.set(default_mode)
+        except ValueError:
+            pass
+
         self.after(100, self._process_queue)
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -57,14 +58,12 @@ class AutomationApp(ctk.CTk):
 
         # ========================================================
         # CỘT TRÁI: THEO DÕI TIẾN ĐỘ, CHECKLIST, NÚT BẤM & LOG
-        # (Đúng theo mockup ASCII)
         # ========================================================
         left_frame = ctk.CTkFrame(self, corner_radius=12, fg_color=("#f1f5f9", "#1e293b"))
         left_frame.grid(row=0, column=0, padx=12, pady=12, sticky="nsew")
         left_frame.grid_columnconfigure(0, weight=1)
-        left_frame.grid_rowconfigure(5, weight=1)  # Log chiếm phần mở rộng còn lại
+        left_frame.grid_rowconfigure(5, weight=1)
 
-        # 1. Tiêu đề
         title_label = ctk.CTkLabel(
             left_frame,
             text="Automation Tool",
@@ -73,7 +72,6 @@ class AutomationApp(ctk.CTk):
         )
         title_label.grid(row=0, column=0, pady=(12, 4), sticky="ew")
 
-        # 2. Status Badge
         status_card = ctk.CTkFrame(left_frame, corner_radius=8, fg_color=("#e2e8f0", "#0f172a"))
         status_card.grid(row=1, column=0, padx=14, pady=(0, 6), sticky="ew")
 
@@ -85,7 +83,6 @@ class AutomationApp(ctk.CTk):
         )
         self.status_label.pack(pady=6)
 
-        # 3. Thông tin tiến độ & Checklist
         dash_card = ctk.CTkFrame(left_frame, corner_radius=8, fg_color=("#e2e8f0", "#0f172a"))
         dash_card.grid(row=2, column=0, padx=14, pady=4, sticky="ew")
         dash_card.grid_columnconfigure(1, weight=1)
@@ -95,7 +92,7 @@ class AutomationApp(ctk.CTk):
         )
         self.lbl_workflow = ctk.CTkLabel(
             dash_card,
-            text=f"0 / {self.app_config.get('total_workflows', 20)}",
+            text="0 / 0",
             font=ctk.CTkFont(size=13, weight="bold"),
             text_color="#38bdf8"
         )
@@ -112,7 +109,6 @@ class AutomationApp(ctk.CTk):
         )
         self.lbl_email.grid(row=1, column=1, padx=12, pady=4, sticky="w")
 
-        # Đường phân cách mỏng
         sep = ctk.CTkFrame(dash_card, height=1, fg_color=("#cbd5e1", "#334155"))
         sep.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=4)
 
@@ -144,7 +140,6 @@ class AutomationApp(ctk.CTk):
             val_label.grid(row=row_idx, column=1, padx=12, pady=2, sticky="w")
             self.check_labels[attr_name] = val_label
 
-        # 4. Nút bấm START / PAUSE / STOP
         btn_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
         btn_frame.grid(row=3, column=0, padx=14, pady=(8, 4), sticky="ew")
         btn_frame.grid_columnconfigure((0, 1, 2), weight=1)
@@ -181,7 +176,6 @@ class AutomationApp(ctk.CTk):
         )
         self.btn_stop.grid(row=0, column=2, padx=3, pady=2, sticky="ew")
 
-        # Nút lớn START AUTOMATION
         self.btn_start_big = ctk.CTkButton(
             left_frame,
             text="[ START AUTOMATION ]",
@@ -193,7 +187,6 @@ class AutomationApp(ctk.CTk):
         )
         self.btn_start_big.grid(row=4, column=0, padx=14, pady=(2, 8), sticky="ew")
 
-        # 5. Khung LOG trực tiếp
         log_frame = ctk.CTkFrame(left_frame, corner_radius=8, fg_color=("#e2e8f0", "#0f172a"))
         log_frame.grid(row=5, column=0, padx=14, pady=(0, 12), sticky="nsew")
         log_frame.grid_columnconfigure(0, weight=1)
@@ -236,101 +229,142 @@ class AutomationApp(ctk.CTk):
         right_frame = ctk.CTkFrame(self, corner_radius=12, fg_color=("#f1f5f9", "#1e293b"))
         right_frame.grid(row=0, column=1, padx=12, pady=12, sticky="nsew")
         right_frame.grid_columnconfigure(0, weight=1)
-        right_frame.grid_rowconfigure(1, weight=1)
+        right_frame.grid_rowconfigure(2, weight=1)
 
         # ----------------------------------------------------
-        # CARD 1: CẤU HÌNH TỰ ĐỘNG HÓA & AI KEY
+        # CARD 1: CẤU HÌNH CHUNG (Dùng chung cho cả 2 chế độ)
         # ----------------------------------------------------
-        config_card = ctk.CTkFrame(right_frame, corner_radius=8, fg_color=("#e2e8f0", "#0f172a"))
-        config_card.grid(row=0, column=0, padx=12, pady=12, sticky="ew")
-        config_card.grid_columnconfigure(1, weight=1)
+        shared_card = ctk.CTkFrame(right_frame, corner_radius=8, fg_color=("#e2e8f0", "#0f172a"))
+        shared_card.grid(row=0, column=0, padx=12, pady=(12, 6), sticky="ew")
+        shared_card.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(
-            config_card,
-            text="CẤU HÌNH HỆ THỐNG & TÀI KHOẢN",
+            shared_card,
+            text="CẤU HÌNH CHUNG",
             font=ctk.CTkFont(size=14, weight="bold"),
             text_color="#38bdf8"
-        ).grid(row=0, column=0, columnspan=3, padx=12, pady=(8, 4), sticky="w")
+        ).grid(row=0, column=0, columnspan=2, padx=12, pady=(8, 4), sticky="w")
 
-        # 0. Number of workers (Luồng)
-        ctk.CTkLabel(config_card, text="Số luồng chạy song song:").grid(row=1, column=0, padx=12, pady=2, sticky="w")
-        self.ent_workers = ctk.CTkEntry(config_card, width=70)
-        self.ent_workers.insert(0, str(self.app_config.get("max_workers", 1)))
-        self.ent_workers.grid(row=1, column=1, padx=6, pady=2, sticky="w")
-        ctk.CTkLabel(config_card, text="luồng", text_color="#94a3b8").grid(row=1, column=2, padx=4, pady=2, sticky="w")
-
-        # 1. Number of workflows
-        ctk.CTkLabel(config_card, text="Số lượng workflows / luồng:").grid(row=2, column=0, padx=12, pady=2, sticky="w")
-        self.ent_workflows = ctk.CTkEntry(config_card, width=70)
-        self.ent_workflows.insert(0, str(self.app_config.get("total_workflows", 20)))
-        self.ent_workflows.grid(row=2, column=1, padx=6, pady=2, sticky="w")
-
-        # 2. Inbox refresh interval
-        ctk.CTkLabel(config_card, text="Chu kỳ refresh email:").grid(row=3, column=0, padx=12, pady=2, sticky="w")
-        self.ent_refresh_interval = ctk.CTkEntry(config_card, width=70)
-        self.ent_refresh_interval.insert(0, str(self.app_config.get("refresh_interval", 15)))
-        self.ent_refresh_interval.grid(row=3, column=1, padx=6, pady=2, sticky="w")
-        ctk.CTkLabel(config_card, text="giây", text_color="#94a3b8").grid(row=3, column=2, padx=4, pady=2, sticky="w")
-
-        # 3. OTP timeout
-        ctk.CTkLabel(config_card, text="Thời gian chờ OTP tối đa:").grid(row=4, column=0, padx=12, pady=2, sticky="w")
-        self.ent_otp_timeout = ctk.CTkEntry(config_card, width=70)
-        self.ent_otp_timeout.insert(0, str(self.app_config.get("otp_timeout", 120)))
-        self.ent_otp_timeout.grid(row=4, column=1, padx=6, pady=2, sticky="w")
-        ctk.CTkLabel(config_card, text="giây", text_color="#94a3b8").grid(row=4, column=2, padx=4, pady=2, sticky="w")
-
-        # 4. Delay between workflows (Nghỉ giữa các tài khoản)
-        ctk.CTkLabel(config_card, text="Nghỉ ngơi giữa các tài khoản:").grid(row=5, column=0, padx=12, pady=2, sticky="w")
-        self.ent_delay_workflows = ctk.CTkEntry(config_card, width=70)
-        self.ent_delay_workflows.insert(0, str(self.app_config.get("delay_between_workflows", 5)))
-        self.ent_delay_workflows.grid(row=5, column=1, padx=6, pady=2, sticky="w")
-        ctk.CTkLabel(config_card, text="giây", text_color="#94a3b8").grid(row=5, column=2, padx=4, pady=2, sticky="w")
-
-        # 5. Delay between circles
-        ctk.CTkLabel(config_card, text="Nghỉ giữa mỗi Circle:").grid(row=6, column=0, padx=12, pady=2, sticky="w")
-        self.ent_delay_circles = ctk.CTkEntry(config_card, width=70)
-        self.ent_delay_circles.insert(0, str(self.app_config.get("delay_between_circles", 1)))
-        self.ent_delay_circles.grid(row=6, column=1, padx=6, pady=2, sticky="w")
-        ctk.CTkLabel(config_card, text="giây", text_color="#94a3b8").grid(row=6, column=2, padx=4, pady=2, sticky="w")
-
-        # 6. Headless mode
-        ctk.CTkLabel(config_card, text="Headless Mode:").grid(row=7, column=0, padx=12, pady=2, sticky="w")
-        self.sw_headless = ctk.CTkSwitch(config_card, text="OFF (Mở trình duyệt trực tiếp)")
+        # Headless mode
+        ctk.CTkLabel(shared_card, text="Headless Mode:").grid(row=1, column=0, padx=12, pady=2, sticky="w")
+        self.sw_headless = ctk.CTkSwitch(shared_card, text="OFF (Mở trình duyệt trực tiếp)")
         if self.app_config.get("headless", False):
             self.sw_headless.select()
             self.sw_headless.configure(text="ON (Chạy ngầm ẩn)")
-        self.sw_headless.grid(row=7, column=1, columnspan=2, padx=6, pady=2, sticky="w")
+        self.sw_headless.grid(row=1, column=1, padx=6, pady=2, sticky="w")
         self.sw_headless.configure(command=self._on_headless_toggle)
 
-        # 7. Target URL
-        ctk.CTkLabel(config_card, text="Target Website URL:").grid(row=8, column=0, padx=12, pady=2, sticky="w")
-        self.ent_target_url = ctk.CTkEntry(config_card, width=320)
+        # Target URL
+        ctk.CTkLabel(shared_card, text="Target Website URL:").grid(row=2, column=0, padx=12, pady=2, sticky="w")
+        self.ent_target_url = ctk.CTkEntry(shared_card, width=320)
         self.ent_target_url.insert(0, self.app_config.get("target_url", DEFAULT_TARGET_URL))
-        self.ent_target_url.grid(row=8, column=1, columnspan=2, padx=6, pady=2, sticky="ew")
+        self.ent_target_url.grid(row=2, column=1, padx=6, pady=2, sticky="ew")
 
-        # 8. AI API Key
-        ctk.CTkLabel(config_card, text="AI API Key:").grid(row=9, column=0, padx=12, pady=(2, 8), sticky="w")
-        self.ent_api_key = ctk.CTkEntry(config_card, width=320, placeholder_text="Dán key AI vào đây...")
+        # AI API Key
+        ctk.CTkLabel(shared_card, text="AI API Key:").grid(row=3, column=0, padx=12, pady=(2, 8), sticky="w")
+        self.ent_api_key = ctk.CTkEntry(shared_card, width=320, placeholder_text="Dán key AI vào đây...")
         if self.app_config.get("api_key_ai"):
             self.ent_api_key.insert(0, self.app_config.get("api_key_ai"))
-        self.ent_api_key.grid(row=9, column=1, columnspan=2, padx=6, pady=(2, 8), sticky="ew")
+        self.ent_api_key.grid(row=3, column=1, padx=6, pady=(2, 8), sticky="ew")
 
         # ----------------------------------------------------
-        # CARD 2: FORM CHUYÊN DỤNG QUẢN LÝ CIRCLE URLS
+        # CARD 2: CẤU HÌNH LUỒNG (TABVIEW)
+        # ----------------------------------------------------
+        self.mode_tabs = ctk.CTkTabview(right_frame, corner_radius=8, fg_color=("#e2e8f0", "#0f172a"))
+        self.mode_tabs.grid(row=1, column=0, padx=12, pady=6, sticky="ew")
+
+        tab_api = self.mode_tabs.add("TempMail (API)")
+        tab_web = self.mode_tabs.add("10MinMail (Trình Duyệt)")
+
+        tab_api.grid_columnconfigure(1, weight=1)
+        tab_web.grid_columnconfigure(1, weight=1)
+
+        # --- SETUP TAB API ---
+        ctk.CTkLabel(tab_api, text="Số luồng chạy song song:").grid(row=0, column=0, padx=12, pady=2, sticky="w")
+        self.ent_api_workers = ctk.CTkEntry(tab_api, width=70)
+        self.ent_api_workers.insert(0, str(self.app_config.get("api_max_workers", 5)))
+        self.ent_api_workers.grid(row=0, column=1, padx=6, pady=2, sticky="w")
+
+        ctk.CTkLabel(tab_api, text="Số lượng workflows / luồng:").grid(row=1, column=0, padx=12, pady=2, sticky="w")
+        self.ent_api_workflows = ctk.CTkEntry(tab_api, width=70)
+        self.ent_api_workflows.insert(0, str(self.app_config.get("api_total_workflows", 200)))
+        self.ent_api_workflows.grid(row=1, column=1, padx=6, pady=2, sticky="w")
+
+        ctk.CTkLabel(tab_api, text="Chu kỳ gọi API lấy thư (s):").grid(row=2, column=0, padx=12, pady=2, sticky="w")
+        self.ent_api_refresh = ctk.CTkEntry(tab_api, width=70)
+        self.ent_api_refresh.insert(0, str(self.app_config.get("api_refresh_interval", 10)))
+        self.ent_api_refresh.grid(row=2, column=1, padx=6, pady=2, sticky="w")
+
+        ctk.CTkLabel(tab_api, text="Giới hạn tạo/check mail (req/phút):").grid(row=3, column=0, padx=12, pady=2, sticky="w")
+        self.ent_api_rate = ctk.CTkEntry(tab_api, width=70)
+        self.ent_api_rate.insert(0, str(self.app_config.get("api_rate_limit", 20)))
+        self.ent_api_rate.grid(row=3, column=1, padx=6, pady=2, sticky="w")
+
+        ctk.CTkLabel(tab_api, text="Thời gian chờ OTP tối đa (s):").grid(row=4, column=0, padx=12, pady=2, sticky="w")
+        self.ent_api_otp_timeout = ctk.CTkEntry(tab_api, width=70)
+        self.ent_api_otp_timeout.insert(0, str(self.app_config.get("api_otp_timeout", 180)))
+        self.ent_api_otp_timeout.grid(row=4, column=1, padx=6, pady=2, sticky="w")
+
+        ctk.CTkLabel(tab_api, text="Nghỉ giữa các tài khoản (s):").grid(row=5, column=0, padx=12, pady=2, sticky="w")
+        self.ent_api_delay_workflows = ctk.CTkEntry(tab_api, width=70)
+        self.ent_api_delay_workflows.insert(0, str(self.app_config.get("api_delay_between_workflows", 3)))
+        self.ent_api_delay_workflows.grid(row=5, column=1, padx=6, pady=2, sticky="w")
+
+        ctk.CTkLabel(tab_api, text="Nghỉ giữa mỗi Circle (s):").grid(row=6, column=0, padx=12, pady=2, sticky="w")
+        self.ent_api_delay_circles = ctk.CTkEntry(tab_api, width=70)
+        self.ent_api_delay_circles.insert(0, str(self.app_config.get("api_delay_between_circles", 1)))
+        self.ent_api_delay_circles.grid(row=6, column=1, padx=6, pady=2, sticky="w")
+
+        # (Đã gỡ bỏ ô nhập TempMail API Key vì dùng bản Free không cần auth)
+
+
+        # --- SETUP TAB WEB ---
+        ctk.CTkLabel(tab_web, text="Số luồng chạy song song:").grid(row=0, column=0, padx=12, pady=2, sticky="w")
+        self.ent_web_workers = ctk.CTkEntry(tab_web, width=70)
+        self.ent_web_workers.insert(0, str(self.app_config.get("max_workers", 1)))
+        self.ent_web_workers.grid(row=0, column=1, padx=6, pady=2, sticky="w")
+
+        ctk.CTkLabel(tab_web, text="Số lượng workflows / luồng:").grid(row=1, column=0, padx=12, pady=2, sticky="w")
+        self.ent_web_workflows = ctk.CTkEntry(tab_web, width=70)
+        self.ent_web_workflows.insert(0, str(self.app_config.get("total_workflows", 20)))
+        self.ent_web_workflows.grid(row=1, column=1, padx=6, pady=2, sticky="w")
+
+        ctk.CTkLabel(tab_web, text="Chu kỳ refresh email (s):").grid(row=2, column=0, padx=12, pady=2, sticky="w")
+        self.ent_web_refresh = ctk.CTkEntry(tab_web, width=70)
+        self.ent_web_refresh.insert(0, str(self.app_config.get("refresh_interval", 15)))
+        self.ent_web_refresh.grid(row=2, column=1, padx=6, pady=2, sticky="w")
+
+        ctk.CTkLabel(tab_web, text="Thời gian chờ OTP tối đa (s):").grid(row=3, column=0, padx=12, pady=2, sticky="w")
+        self.ent_web_otp_timeout = ctk.CTkEntry(tab_web, width=70)
+        self.ent_web_otp_timeout.insert(0, str(self.app_config.get("otp_timeout", 120)))
+        self.ent_web_otp_timeout.grid(row=3, column=1, padx=6, pady=2, sticky="w")
+
+        ctk.CTkLabel(tab_web, text="Nghỉ giữa các tài khoản (s):").grid(row=4, column=0, padx=12, pady=2, sticky="w")
+        self.ent_web_delay_workflows = ctk.CTkEntry(tab_web, width=70)
+        self.ent_web_delay_workflows.insert(0, str(self.app_config.get("delay_between_workflows", 5)))
+        self.ent_web_delay_workflows.grid(row=4, column=1, padx=6, pady=2, sticky="w")
+
+        ctk.CTkLabel(tab_web, text="Nghỉ giữa mỗi Circle (s):").grid(row=5, column=0, padx=12, pady=(2, 8), sticky="w")
+        self.ent_web_delay_circles = ctk.CTkEntry(tab_web, width=70)
+        self.ent_web_delay_circles.insert(0, str(self.app_config.get("delay_between_circles", 1)))
+        self.ent_web_delay_circles.grid(row=5, column=1, padx=6, pady=(2, 8), sticky="w")
+
+
+        # ----------------------------------------------------
+        # CARD 3: FORM CHUYÊN DỤNG QUẢN LÝ CIRCLE URLS
         # ----------------------------------------------------
         circle_card = ctk.CTkFrame(right_frame, corner_radius=8, fg_color=("#e2e8f0", "#0f172a"))
-        circle_card.grid(row=1, column=0, padx=12, pady=(0, 12), sticky="nsew")
+        circle_card.grid(row=2, column=0, padx=12, pady=(6, 12), sticky="nsew")
         circle_card.grid_columnconfigure(0, weight=1)
         circle_card.grid_rowconfigure(2, weight=1)
 
-        # Header card Circle
         circle_header = ctk.CTkFrame(circle_card, fg_color="transparent")
         circle_header.grid(row=0, column=0, padx=12, pady=(8, 4), sticky="ew")
         circle_header.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
             circle_header,
-            text="DANH SÁCH CIRCLE URLS (THEO DÕI & THAM GIA)",
+            text="DANH SÁCH CIRCLE URLS",
             font=ctk.CTkFont(size=13, weight="bold"),
             text_color="#38bdf8"
         ).grid(row=0, column=0, sticky="w")
@@ -343,14 +377,13 @@ class AutomationApp(ctk.CTk):
         )
         self.lbl_circle_count.grid(row=0, column=1, sticky="e")
 
-        # Hàng thêm nhanh 1 Circle
         add_row = ctk.CTkFrame(circle_card, fg_color="transparent")
         add_row.grid(row=1, column=0, padx=12, pady=(0, 6), sticky="ew")
         add_row.grid_columnconfigure(0, weight=1)
 
         self.ent_quick_circle = ctk.CTkEntry(
             add_row,
-            placeholder_text="Nhập hoặc dán link Circle (vd: https://ucircle.net/app/c/...) rồi nhấn Thêm"
+            placeholder_text="Dán link Circle (vd: https://ucircle.net/app/c/...)"
         )
         self.ent_quick_circle.grid(row=0, column=0, padx=(0, 6), sticky="ew")
 
@@ -364,7 +397,6 @@ class AutomationApp(ctk.CTk):
         )
         btn_add_circle.grid(row=0, column=1, sticky="e")
 
-        # Textbox hiển thị toàn bộ danh sách Circle URLs (to, rõ ràng)
         self.txt_circles = ctk.CTkTextbox(
             circle_card,
             font=ctk.CTkFont(family="Consolas", size=11),
@@ -375,14 +407,13 @@ class AutomationApp(ctk.CTk):
         self.txt_circles.insert("1.0", initial_circles)
         self.txt_circles.grid(row=2, column=0, padx=12, pady=(0, 8), sticky="nsew")
 
-        # Hàng nút thao tác nhanh: Lưu danh sách, Dán, Xóa hết
         circle_actions = ctk.CTkFrame(circle_card, fg_color="transparent")
         circle_actions.grid(row=3, column=0, padx=12, pady=(0, 10), sticky="ew")
         circle_actions.grid_columnconfigure((0, 1, 2), weight=1)
 
         btn_save_circles = ctk.CTkButton(
             circle_actions,
-            text="💾 Lưu Danh Sách (config.json)",
+            text="💾 Lưu Cấu Hình",
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color="#059669",
             hover_color="#047857",
@@ -436,7 +467,6 @@ class AutomationApp(ctk.CTk):
         self.lbl_circle_count.configure(text=f"({len(urls)} Circles)")
 
     def on_add_quick_circle(self):
-        """Thêm 1 Circle từ ô nhập nhanh vào Textbox"""
         new_url = self.ent_quick_circle.get().strip()
         if not new_url:
             return
@@ -452,27 +482,42 @@ class AutomationApp(ctk.CTk):
         self.on_save_circles_clicked()
 
     def on_save_circles_clicked(self):
-        """Lưu danh sách Circle và cấu hình vào config.json"""
-        circle_urls = self._get_current_circle_urls()
-        self.app_config["circle_urls"] = circle_urls
+        # Lấy giá trị chung
+        self.app_config["circle_urls"] = self._get_current_circle_urls()
         self.app_config["api_key_ai"] = self.ent_api_key.get().strip()
         self.app_config["target_url"] = self.ent_target_url.get().strip() or DEFAULT_TARGET_URL
+        self.app_config["headless"] = (self.sw_headless.get() == 1)
+        self.app_config["email_mode"] = self.mode_tabs.get()
+
+        # Lấy giá trị Tab API
         try:
-            self.app_config["max_workers"] = int(self.ent_workers.get().strip() or "1")
-            self.app_config["delay_between_workflows"] = float(self.ent_delay_workflows.get().strip() or "5")
-            self.app_config["delay_between_circles"] = float(self.ent_delay_circles.get().strip() or "1")
-            self.app_config["total_workflows"] = int(self.ent_workflows.get().strip() or "20")
-            self.app_config["refresh_interval"] = int(self.ent_refresh_interval.get().strip() or "15")
-            self.app_config["otp_timeout"] = int(self.ent_otp_timeout.get().strip() or "120")
+            self.app_config["api_max_workers"] = int(self.ent_api_workers.get().strip() or "5")
+            self.app_config["api_total_workflows"] = int(self.ent_api_workflows.get().strip() or "200")
+            self.app_config["api_refresh_interval"] = int(self.ent_api_refresh.get().strip() or "10")
+            self.app_config["api_otp_timeout"] = int(self.ent_api_otp_timeout.get().strip() or "180")
+            self.app_config["api_delay_between_workflows"] = float(self.ent_api_delay_workflows.get().strip() or "3")
+            self.app_config["api_delay_between_circles"] = float(self.ent_api_delay_circles.get().strip() or "1")
+            self.app_config["api_rate_limit"] = int(self.ent_api_rate.get().strip() or "25")
+            # Đã bỏ tempmail_api_key
+        except ValueError:
+            pass
+
+        # Lấy giá trị Tab Web
+        try:
+            self.app_config["max_workers"] = int(self.ent_web_workers.get().strip() or "1")
+            self.app_config["total_workflows"] = int(self.ent_web_workflows.get().strip() or "20")
+            self.app_config["refresh_interval"] = int(self.ent_web_refresh.get().strip() or "15")
+            self.app_config["otp_timeout"] = int(self.ent_web_otp_timeout.get().strip() or "120")
+            self.app_config["delay_between_workflows"] = float(self.ent_web_delay_workflows.get().strip() or "5")
+            self.app_config["delay_between_circles"] = float(self.ent_web_delay_circles.get().strip() or "1")
         except ValueError:
             pass
 
         save_config(self.app_config)
         self._update_circle_badge()
-        self.append_log(f"✓ Đã lưu danh sách ({len(circle_urls)} Circles) vào config.json thành công!")
+        self.append_log("✓ Đã lưu cấu hình (tất cả các tab) thành công!")
 
     def on_paste_clipboard_circles(self):
-        """Dán nội dung từ clipboard vào Textbox"""
         try:
             clipboard_text = self.clipboard_get()
             if clipboard_text:
@@ -483,7 +528,6 @@ class AutomationApp(ctk.CTk):
             self.append_log(f"Không thể đọc clipboard: {e}")
 
     def on_clear_circles_clicked(self):
-        """Xóa hết danh sách Circle trong Textbox"""
         self.txt_circles.delete("1.0", "end")
         self._update_circle_badge()
         self.on_save_circles_clicked()
@@ -505,7 +549,6 @@ class AutomationApp(ctk.CTk):
                     status = data.get("status", "IDLE")
                     self.worker_states[worker_id] = status
 
-                    # Tính toán global status
                     active_states = self.worker_states.values()
                     if "RUNNING" in active_states:
                         global_status = "RUNNING"
@@ -559,7 +602,6 @@ class AutomationApp(ctk.CTk):
                         self.lbl_email.configure(text=f"[L{worker_id}] {email}")
 
                 elif event_type == "checklist":
-                    # Cập nhật checklist cho luồng cuối cùng thay đổi trạng thái
                     for key, val in data.items():
                         if key == "worker_id":
                             continue
@@ -576,40 +618,36 @@ class AutomationApp(ctk.CTk):
             self.after(80, self._process_queue)
 
     def on_start_clicked(self):
-        try:
-            max_workers = int(self.ent_workers.get().strip() or "1")
-            workflows = int(self.ent_workflows.get().strip() or "20")
-            refresh_interval = int(self.ent_refresh_interval.get().strip() or "15")
-            otp_timeout = int(self.ent_otp_timeout.get().strip() or "120")
-            delay_workflows = float(self.ent_delay_workflows.get().strip() or "5")
-            delay_circles = float(self.ent_delay_circles.get().strip() or "1")
-        except ValueError:
-            self.append_log("Lỗi: Vui lòng nhập số hợp lệ cho các trường cấu hình!")
-            return
-
-        headless = (self.sw_headless.get() == 1)
-        target_url = self.ent_target_url.get().strip() or DEFAULT_TARGET_URL
-        api_key_ai = self.ent_api_key.get().strip()
-        circle_urls = self._get_current_circle_urls()
-
-        # Lưu cấu hình mới ra config.json
-        new_cfg = {
-            "api_key_ai": api_key_ai,
-            "ai_base_url": self.app_config.get("ai_base_url", "https://api1.shupremium.com/v1"),
-            "ai_model": self.app_config.get("ai_model", "gpt-4o-mini"),
-            "circle_urls": circle_urls,
-            "delay_between_workflows": delay_workflows,
-            "delay_between_circles": delay_circles,
-            "max_workers": max_workers,
-            "total_workflows": workflows,
-            "refresh_interval": refresh_interval,
-            "otp_timeout": otp_timeout,
-            "headless": headless,
-            "target_url": target_url
-        }
-        save_config(new_cfg)
-        self.app_config = new_cfg
-        self._update_circle_badge()
+        # Gọi lưu cấu hình trước khi chạy
+        self.on_save_circles_clicked()
+        
+        email_mode = self.mode_tabs.get()
+        
+        # Load lại từ config mới lưu
+        headless = self.app_config.get("headless", False)
+        target_url = self.app_config.get("target_url", DEFAULT_TARGET_URL)
+        api_key_ai = self.app_config.get("api_key_ai", "")
+        circle_urls = self.app_config.get("circle_urls", [])
+        
+        if email_mode == "TempMail (API)":
+            max_workers = self.app_config.get("api_max_workers", 5)
+            workflows = self.app_config.get("api_total_workflows", 200)
+            refresh_interval = self.app_config.get("api_refresh_interval", 10)
+            otp_timeout = self.app_config.get("api_otp_timeout", 180)
+            delay_workflows = self.app_config.get("api_delay_between_workflows", 3)
+            delay_circles = self.app_config.get("api_delay_between_circles", 1)
+            api_rate_limit = self.app_config.get("api_rate_limit", 25)
+            # Đã gỡ bỏ tempmail_api_key
+            
+            # Cập nhật rate limiter
+            global_rate_limiter.update_rate(api_rate_limit)
+        else:
+            max_workers = self.app_config.get("max_workers", 1)
+            workflows = self.app_config.get("total_workflows", 20)
+            refresh_interval = self.app_config.get("refresh_interval", 15)
+            otp_timeout = self.app_config.get("otp_timeout", 120)
+            delay_workflows = self.app_config.get("delay_between_workflows", 5)
+            delay_circles = self.app_config.get("delay_between_circles", 1)
 
         if "127.0.0.1:5000" in target_url:
             self.mock_server.start()
@@ -617,25 +655,43 @@ class AutomationApp(ctk.CTk):
         self.workers = []
         self.worker_threads = []
 
-        self.append_log(f"Bắt đầu khởi chạy {max_workers} luồng tự động hóa...")
+        self.append_log(f"Bắt đầu chạy {max_workers} luồng - Chế độ: {email_mode} ...")
 
         for i in range(max_workers):
             worker_id = i + 1
-            worker = AutomationWorker(
-                worker_id=worker_id,
-                total_workflows=workflows,
-                refresh_interval=refresh_interval,
-                otp_timeout=otp_timeout,
-                headless=headless,
-                target_url=target_url,
-                circle_urls=circle_urls,
-                delay_between_workflows=delay_workflows,
-                delay_between_circles=delay_circles,
-                api_key_ai=api_key_ai,
-                ai_base_url=new_cfg.get("ai_base_url", "https://api1.shupremium.com/v1"),
-                ai_model=new_cfg.get("ai_model", "gpt-4o-mini"),
-                ui_callback=self.ui_callback
-            )
+            if email_mode == "TempMail (API)":
+                worker = AutomationWorkerAPI(
+                    worker_id=worker_id,
+                    total_workflows=workflows,
+                    refresh_interval=refresh_interval,
+                    otp_timeout=otp_timeout,
+                    headless=headless,
+                    target_url=target_url,
+                    circle_urls=circle_urls,
+                    delay_between_workflows=delay_workflows,
+                    delay_between_circles=delay_circles,
+                    api_key_ai=api_key_ai,
+                    ai_base_url=self.app_config.get("ai_base_url", "https://api1.shupremium.com/v1"),
+                    ai_model=self.app_config.get("ai_model", "gpt-4o-mini"),
+                    ui_callback=self.ui_callback
+                )
+            else:
+                worker = AutomationWorker(
+                    worker_id=worker_id,
+                    total_workflows=workflows,
+                    refresh_interval=refresh_interval,
+                    otp_timeout=otp_timeout,
+                    headless=headless,
+                    target_url=target_url,
+                    circle_urls=circle_urls,
+                    delay_between_workflows=delay_workflows,
+                    delay_between_circles=delay_circles,
+                    api_key_ai=api_key_ai,
+                    ai_base_url=self.app_config.get("ai_base_url", "https://api1.shupremium.com/v1"),
+                    ai_model=self.app_config.get("ai_model", "gpt-4o-mini"),
+                    ui_callback=self.ui_callback
+                )
+
             self.workers.append(worker)
 
             def run_worker_thread(w=worker, start_delay=(worker_id - 1) * 4):
@@ -653,8 +709,6 @@ class AutomationApp(ctk.CTk):
     def on_pause_clicked(self):
         if not self.workers:
             return
-        
-        # Lấy trạng thái từ worker đầu tiên làm chuẩn
         is_paused = self.workers[0].is_paused
         for worker in self.workers:
             if is_paused:
@@ -668,7 +722,6 @@ class AutomationApp(ctk.CTk):
         sleep_preventer.allow_sleep()
 
     def on_closing(self):
-        """Dọn dẹp tài nguyên và khôi phục chế độ sleep khi đóng cửa sổ ứng dụng"""
         try:
             for worker in self.workers:
                 worker.stop()
