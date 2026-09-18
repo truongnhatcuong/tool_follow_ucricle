@@ -142,17 +142,7 @@ class AutomationApp(ctk.CTk):
 
         btn_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
         btn_frame.grid(row=3, column=0, padx=14, pady=(8, 4), sticky="ew")
-        btn_frame.grid_columnconfigure((0, 1, 2), weight=1)
-
-        self.btn_start = ctk.CTkButton(
-            btn_frame,
-            text="START",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            fg_color="#10b981",
-            hover_color="#059669",
-            command=self.on_start_clicked
-        )
-        self.btn_start.grid(row=0, column=0, padx=3, pady=2, sticky="ew")
+        btn_frame.grid_columnconfigure((0, 1), weight=1)
 
         self.btn_pause = ctk.CTkButton(
             btn_frame,
@@ -163,7 +153,7 @@ class AutomationApp(ctk.CTk):
             state="disabled",
             command=self.on_pause_clicked
         )
-        self.btn_pause.grid(row=0, column=1, padx=3, pady=2, sticky="ew")
+        self.btn_pause.grid(row=0, column=0, padx=3, pady=2, sticky="ew")
 
         self.btn_stop = ctk.CTkButton(
             btn_frame,
@@ -174,21 +164,32 @@ class AutomationApp(ctk.CTk):
             state="disabled",
             command=self.on_stop_clicked
         )
-        self.btn_stop.grid(row=0, column=2, padx=3, pady=2, sticky="ew")
+        self.btn_stop.grid(row=0, column=1, padx=3, pady=2, sticky="ew")
 
-        self.btn_start_big = ctk.CTkButton(
+        self.btn_start_api = ctk.CTkButton(
             left_frame,
-            text="[ START AUTOMATION ]",
+            text="[ BẮT ĐẦU CHẠY BẰNG API ]",
             font=ctk.CTkFont(size=15, weight="bold"),
             height=38,
             fg_color="#0284c7",
             hover_color="#0369a1",
-            command=self.on_start_clicked
+            command=lambda: self.on_start_clicked("TempMail (API)")
         )
-        self.btn_start_big.grid(row=4, column=0, padx=14, pady=(2, 8), sticky="ew")
+        self.btn_start_api.grid(row=4, column=0, padx=14, pady=(2, 4), sticky="ew")
+
+        self.btn_start_web = ctk.CTkButton(
+            left_frame,
+            text="[ BẮT ĐẦU CHẠY BẰNG 10MINMAIL ]",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            height=38,
+            fg_color="#10b981",
+            hover_color="#059669",
+            command=lambda: self.on_start_clicked("10MinMail (Trình Duyệt)")
+        )
+        self.btn_start_web.grid(row=5, column=0, padx=14, pady=(0, 8), sticky="ew")
 
         log_frame = ctk.CTkFrame(left_frame, corner_radius=8, fg_color=("#e2e8f0", "#0f172a"))
-        log_frame.grid(row=5, column=0, padx=14, pady=(0, 12), sticky="nsew")
+        log_frame.grid(row=6, column=0, padx=14, pady=(0, 12), sticky="nsew")
         log_frame.grid_columnconfigure(0, weight=1)
         log_frame.grid_rowconfigure(1, weight=1)
 
@@ -575,13 +576,13 @@ class AutomationApp(ctk.CTk):
                     self.status_label.configure(text=text, text_color=color)
 
                     if global_status in ["STOPPED", "COMPLETED", "ERROR", "IDLE"]:
-                        self.btn_start.configure(state="normal")
-                        self.btn_start_big.configure(state="normal")
+                        self.btn_start_api.configure(state="normal")
+                        self.btn_start_web.configure(state="normal")
                         self.btn_pause.configure(state="disabled", text="PAUSE")
                         self.btn_stop.configure(state="disabled")
                     elif global_status == "RUNNING":
-                        self.btn_start.configure(state="disabled")
-                        self.btn_start_big.configure(state="disabled")
+                        self.btn_start_api.configure(state="disabled")
+                        self.btn_start_web.configure(state="disabled")
                         self.btn_pause.configure(state="normal", text="PAUSE")
                         self.btn_stop.configure(state="normal")
                     elif global_status == "PAUSED":
@@ -617,11 +618,12 @@ class AutomationApp(ctk.CTk):
         finally:
             self.after(80, self._process_queue)
 
-    def on_start_clicked(self):
+    def on_start_clicked(self, email_mode: str = None):
         # Gọi lưu cấu hình trước khi chạy
         self.on_save_circles_clicked()
         
-        email_mode = self.mode_tabs.get()
+        if email_mode is None:
+            email_mode = self.mode_tabs.get()
         
         # Load lại từ config mới lưu
         headless = self.app_config.get("headless", False)
