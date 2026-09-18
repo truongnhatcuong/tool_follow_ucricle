@@ -52,8 +52,8 @@ class AutomationApp(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def _create_ui(self):
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1, uniform="main_cols")
+        self.grid_columnconfigure(1, weight=1, uniform="main_cols")
         self.grid_rowconfigure(0, weight=1)
 
         # ========================================================
